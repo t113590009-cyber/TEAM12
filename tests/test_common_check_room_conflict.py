@@ -31,3 +31,32 @@ def test_same_room_same_slot_reports_room_conflict():
         "day": 2, "period": "3", "with_kind": "course",
         "with_id": "1150001", "with_name": "微積分",
     }
+
+def test_different_room_same_slot_no_conflict():
+    state = make_state({"1150001": make_course(room_id="R201")})
+    result = check_room_conflict(state, "R101", [{"day": 2, "period": "3"}])
+    assert result["ok"] is True
+    assert result["errors"] == []
+
+
+@pytest.mark.boundary
+def test_adjacent_periods_no_conflict():
+    state = make_state({"1150001": make_course(slots=[{"day": 2, "period": "3"}])})
+    result = check_room_conflict(state, "R101", [{"day": 2, "period": "4"}])
+    assert result["ok"] is True
+
+
+@pytest.mark.boundary
+def test_cancelled_course_does_not_conflict():
+    state = make_state({"1150001": make_course(status="cancelled")})
+    result = check_room_conflict(state, "R101", [{"day": 2, "period": "3"}])
+    assert result["ok"] is True
+
+
+@pytest.mark.boundary
+def test_ignore_id_skips_own_course():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(
+        state, "R101", [{"day": 2, "period": "3"}], ignore_id="1150001"
+    )
+    assert result["ok"] is True
