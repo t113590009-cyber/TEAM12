@@ -82,3 +82,40 @@ def test_conflicts_sorted_letter_period_after_digit():
     result = check_room_conflict(state, "R101", both)
     got = [e["detail"]["period"] for e in result["errors"]]
     assert got == ["9", "a"]
+
+@pytest.mark.error
+def test_invalid_day_reports_invalid_period():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(state, "R101", [{"day": 8, "period": "3"}])
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
+    assert result["errors"][0]["detail"] == {"slot": {"day": 8, "period": "3"}}
+
+
+@pytest.mark.error
+def test_invalid_period_letter_reports_invalid_period():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(state, "R101", [{"day": 2, "period": "d"}])
+    assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
+
+
+@pytest.mark.error
+def test_empty_dict_slot_reports_invalid_period():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(state, "R101", [{}])
+    assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
+
+
+@pytest.mark.error
+def test_invalid_slot_does_not_hide_real_conflict():
+    state = make_state({"1150001": make_course()})
+    slots = [{"day": 8, "period": "3"}, {"day": 2, "period": "3"}]
+    result = check_room_conflict(state, "R101", slots)
+    assert [e["code"] for e in result["errors"]] == ["ROOM_CONFLICT", "INVALID_PERIOD"]
+
+
+@pytest.mark.boundary
+def test_empty_slots_list_is_ok():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(state, "R101", [])
+    assert result["ok"] is True
