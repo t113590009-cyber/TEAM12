@@ -1,6 +1,6 @@
+from src.common.periods import period_index
 from src.common.result import make_error, make_result
-from src.common.time_slot import is_valid_slot, period_index, slots_overlap
-
+from src.common.time_slot import is_valid_slot, slots_overlap
 
 def _sort_key(error):
     detail = error["detail"]
