@@ -50,8 +50,13 @@ def test_period_index_digit_nine():
 @pytest.mark.normal
 def test_period_index_letter_a():
     assert period_index("a") == 10
-    
-    
+
+
+@pytest.mark.normal
+def test_period_index_letter_A():
+    assert period_index("A") == 10   
+  
+   
 @pytest.mark.normal
 def test_period_index_letter_b():
     assert period_index("b") == 11
