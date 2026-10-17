@@ -32,6 +32,7 @@ def test_same_room_same_slot_reports_room_conflict():
         "with_id": "1150001", "with_name": "微積分",
     }
 
+@pytest.mark.normal
 def test_different_room_same_slot_no_conflict():
     state = make_state({"1150001": make_course(room_id="R201")})
     result = check_room_conflict(state, "R101", [{"day": 2, "period": "3"}])
@@ -52,7 +53,6 @@ def test_cancelled_course_does_not_conflict():
     result = check_room_conflict(state, "R101", [{"day": 2, "period": "3"}])
     assert result["ok"] is True
 
-
 @pytest.mark.boundary
 def test_ignore_id_skips_own_course():
     state = make_state({"1150001": make_course()})
@@ -60,3 +60,25 @@ def test_ignore_id_skips_own_course():
         state, "R101", [{"day": 2, "period": "3"}], ignore_id="1150001"
     )
     assert result["ok"] is True
+
+@pytest.mark.boundary
+def test_conflicts_sorted_by_day_then_period():
+    state = make_state({
+        "1150002": make_course(course_id="1150002", name="物理",
+                               slots=[{"day": 4, "period": "5"}]),
+        "1150001": make_course(course_id="1150001", name="微積分",
+                               slots=[{"day": 2, "period": "3"}]),
+    })
+    new_slots = [{"day": 4, "period": "5"}, {"day": 2, "period": "3"}]
+    result = check_room_conflict(state, "R101", new_slots)
+    got = [(e["detail"]["day"], e["detail"]["period"]) for e in result["errors"]]
+    assert got == [(2, "3"), (4, "5")]
+
+
+@pytest.mark.boundary
+def test_conflicts_sorted_letter_period_after_digit():
+    both = [{"day": 1, "period": "a"}, {"day": 1, "period": "9"}]
+    state = make_state({"1150001": make_course(slots=both)})
+    result = check_room_conflict(state, "R101", both)
+    got = [e["detail"]["period"] for e in result["errors"]]
+    assert got == ["9", "a"]
