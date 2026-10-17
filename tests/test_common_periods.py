@@ -53,7 +53,7 @@ def test_period_index_letter_a():
 
 
 @pytest.mark.normal
-def test_period_index_letter_A():
+def test_period_index_letter_upper_a():
     assert period_index("A") == 10   
   
    
@@ -78,5 +78,20 @@ def test_period_index_rejects_0():
     
     
 @pytest.mark.error
-def test_period_index_rejects_10():
-    assert period_index("10") == None
+def test_period_index_rejects_True():
+    assert period_index(True) == None
+
+
+@pytest.mark.error
+def test_period_index_rejects_False():
+    assert period_index(False) == None
+    
+
+@pytest.mark.error
+def test_period_index_rejects_integer_three():
+    assert period_index(3.0) == None
+    
+
+@pytest.mark.error
+def test_period_index_rejects_null():
+    assert period_index(" ") == None
