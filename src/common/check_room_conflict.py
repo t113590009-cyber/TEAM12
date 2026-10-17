@@ -1,5 +1,9 @@
 from src.common.result import make_error, make_result
-from src.common.time_slot import slots_overlap
+from src.common.time_slot import period_index, slots_overlap
+
+def _sort_key(error):
+    detail = error["detail"]
+    return (detail["day"], period_index(detail["period"]), detail["with_id"])
 
 
 def check_room_conflict(state, room_id, slots, ignore_id=None):
@@ -7,7 +11,7 @@ def check_room_conflict(state, room_id, slots, ignore_id=None):
 
     Input: state、room_id、slots(時段清單)、ignore_id(要排除的代號)
     Process: 比對同教室、非取消、非 ignore_id 的課程時段
-    Output: {ok, data, errors},每個衝突一筆 ROOM_CONFLICT
+    Output: {ok, data, errors},每個衝突一筆 ROOM_CONFLICT,依 (day, period_index) 排序
     Boundary: 目前只處理課程;活動與非法輸入下一輪加
     """
     errors = []
@@ -25,4 +29,5 @@ def check_room_conflict(state, room_id, slots, ignore_id=None):
                          "with_kind": "course", "with_id": course["course_id"],
                          "with_name": course["name"]},
                     ))
+    errors.sort(key=_sort_key)
     return make_result(None, errors)
