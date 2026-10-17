@@ -13,3 +13,17 @@ def period_index(period):
             return None
     else:
         return None
+    
+def is_valid_slot(slot):
+    if(type(slot) is not dict):
+        return False
+    elif(slot.get("day")==None or slot.get("period")==None):
+        return False 
+    elif((type(slot["day"]) is not int) or (1>slot["day"] or slot["day"]>7)):
+        return False    
+    elif(period_index(slot["period"])==None):
+        return False
+    else:
+        return True
+        
+            
