@@ -25,5 +25,10 @@ def is_valid_slot(slot):
         return False
     else:
         return True
+def slots_overlap(slot1,slot2):
+    if(is_valid_slot(slot1) and is_valid_slot(slot2)):
+        return(slot1["day"]==slot2["day"] and period_index(slot1["period"])==period_index(slot2["period"]))
+    else:
+        return False
         
             

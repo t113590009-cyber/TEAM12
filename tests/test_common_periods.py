@@ -1,7 +1,9 @@
 import pytest
 from src.common.periods import period_index
 from src.common.periods import is_valid_slot
+from src.common.periods import slots_overlap
 
+## period_index的測試
 @pytest.mark.boundary
 @pytest.mark.parametrize("x,expected",[
     (1,1),
@@ -43,7 +45,7 @@ def test_period_index_digit_normal(y,expected):
 def test_period_index_rejects_(z,expected):
     assert period_index("z") == expected
 
-
+## is_valid_slot的測試資料
 @pytest.mark.boundary	
 @pytest.mark.parametrize("x1,x2,expected",[
     (5,"7",True),
@@ -115,4 +117,75 @@ def test_is_valid_slot_rejects_missing_field(x1,x2,expected):
 def test_is_valid_slot_rejects_non_dict(x1,x2,expected):
     slot={"day":x1, "period": x2}
     assert is_valid_slot(slot)==expected
+
+##slot_overlap測試資料
+@pytest.mark.normal
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+   (2,"3",2,"3",True),
+   (5,"7",5,"7",True),
+   (1,"a",1,"a",True),
+])
+def test_slots_overlap_same_slot(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
+
+@pytest.mark.normal
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+   (2,"3",3,"3",False),
+   (1,"5",7,"5",False),
+])
+def test_slots_overlap_different_day(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
+
+
+@pytest.mark.normal
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+   (2,"3",2,"5",False),
+   (4,"1",4,"c",False),
+])
+def test_slots_overlap_different_period(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
     
+
+@pytest.mark.boundary
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+   (2,"3",2,"4",False),
+   (2,"4",2,"5",False),
+   (2,"9",2,"a",False),
+])
+def test_slots_overlap_adjacent_periods(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
+
+
+@pytest.mark.boundary
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+   (1,"1",1,"1",True),
+   (7,"c",7,"c",True),
+])
+def test_slots_overlap_day_edges(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
+    
+
+@pytest.mark.error
+@pytest.mark.parametrize("x1,x2,x3,x4,expected",[
+    (8,"3",8,"3",False),
+   (0,"3",0,"3",False),
+   (2,"d",2,"d",False),
+   (True,"9",True,"a",False),
+])
+def test_slots_overlap_rejects_invalid_slot(x1,x2,x3,x4,expected):
+    slot1={"day":x1, "period": x2}
+    slot2={"day":x3, "period": x4}
+    assert slots_overlap(slot1,slot2)==expected
+
+
+
