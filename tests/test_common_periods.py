@@ -3,95 +3,42 @@ from src.common.periods import period_index
 
 
 @pytest.mark.boundary
-def test_period_index_digit_one():
-    assert period_index("1") == 1
+@pytest.mark.parametrize("x,expected",[
+    ("1",1),
+    ("c",12),
+    ("C",12),
+])
+def test_period_index_boundary(x,expected):
+    assert period_index(x)==expected
     
     
 @pytest.mark.normal
-def test_period_index_digit_two():
-    assert period_index("2") == 2
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_three():
-    assert period_index("3") == 3
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_four():
-    assert period_index("4") == 4
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_five():
-    assert period_index("5") == 5
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_six():
-    assert period_index("6") == 6
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_seven():
-    assert period_index("7") == 7
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_eight():
-    assert period_index("8") == 8
-    
-    
-@pytest.mark.normal
-def test_period_index_digit_nine():
-    assert period_index("9") == 9
-    
-    
-@pytest.mark.normal
-def test_period_index_letter_a():
-    assert period_index("a") == 10
-
-
-@pytest.mark.normal
-def test_period_index_letter_upper_a():
-    assert period_index("A") == 10   
-  
-   
-@pytest.mark.normal
-def test_period_index_letter_b():
-    assert period_index("b") == 11
-    
-    
-@pytest.mark.boundary
-def test_period_index_letter_c():
-    assert period_index("c") == 12
-
-
-@pytest.mark.error
-def test_period_index_rejects_d():
-    assert period_index("d") == None
-    
-    
-@pytest.mark.error
-def test_period_index_rejects_0():
-    assert period_index("0") == None
-    
-    
-@pytest.mark.error
-def test_period_index_rejects_True():
-    assert period_index(True) == None
-
-
-@pytest.mark.error
-def test_period_index_rejects_False():
-    assert period_index(False) == None
+@pytest.mark.parametrize("y,expected",[
+    ("2",2),
+    ("3",3),
+    ("4",4),
+    ("5",5),
+    ("6",6),
+    ("7",7),
+    ("8",8),
+    ("9",9),
+    ("a",10),
+    ("b",11),
+    ("A",10),
+    ("B",11),
+])
+def test_period_index_digit_normal(y,expected):
+    assert period_index(y)==expected
     
 
 @pytest.mark.error
-def test_period_index_rejects_integer_three():
-    assert period_index(3.0) == None
-    
-
-@pytest.mark.error
-def test_period_index_rejects_null():
-    assert period_index(" ") == None
+@pytest.mark.parametrize("z,expected",[
+    ("d",None),
+    ("0",None),
+    ("True",None),
+    ("False",None),
+    ("3.0",None),
+    (" ",None),
+])
+def test_period_index_rejects_(z,expected):
+    assert period_index("z") == expected
