@@ -119,3 +119,16 @@ def test_empty_slots_list_is_ok():
     state = make_state({"1150001": make_course()})
     result = check_room_conflict(state, "R101", [])
     assert result["ok"] is True
+
+@pytest.mark.boundary
+def test_int_period_conflicts_with_string_period():
+    state = make_state({"1150001": make_course()})
+    result = check_room_conflict(state, "R101", [{"day": 2, "period": 3}])
+    assert [e["code"] for e in result["errors"]] == ["ROOM_CONFLICT"]
+
+
+@pytest.mark.boundary
+def test_uppercase_period_conflicts_with_lowercase():
+    state = make_state({"1150001": make_course(slots=[{"day": 1, "period": "a"}])})
+    result = check_room_conflict(state, "R101", [{"day": 1, "period": "A"}])
+    assert [e["code"] for e in result["errors"]] == ["ROOM_CONFLICT"]
