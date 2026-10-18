@@ -1,12 +1,13 @@
 """F1 課程與學生資料管理（負責：組員 B）。
 
-只依賴共用層（result、validators、utils.check_room_conflict / slots_overlap）。
+只依賴共用層（result、validators、check_room_conflict、time_slot.slots_overlap）。
 所有函式直接修改傳入的 state 並回傳 {ok, data, errors}；業務錯誤不拋例外。
 """
 import copy
 
 from src.common.result import make_error, make_ok, make_result
-from src.common.time_slot import check_room_conflict, slots_overlap
+from src.common.check_room_conflict import check_room_conflict
+from src.common.time_slot import slots_overlap
 from src.common.validators import (VALID_CATEGORIES, validate_course, validate_room,
                                    validate_student)
 
