@@ -471,4 +471,5 @@ def test_delete_room_not_found(state):
 def test_sample_data_planted_room_conflict_is_blocked_by_f1(new_state):
     s = plant_room_conflict(build_sample_state(new_state()))
     clash = dict(s.courses["1150099"], course_id="1150098")
-    assert codes(add_course(s, clash)) == ["ROOM_CONFLICT"]
+    res = add_course(s, clash)
+    assert res["ok"] is False and set(codes(res)) == {"ROOM_CONFLICT"}
