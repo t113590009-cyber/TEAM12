@@ -2,6 +2,8 @@ import pytest
 from src.common.periods import period_index
 from src.common.periods import is_valid_slot
 from src.common.periods import slots_overlap
+from src.common.periods import _time_to_minutes
+from src.common.periods import time_ranges_overlap
 
 ## period_index的測試
 @pytest.mark.boundary
@@ -86,10 +88,10 @@ def test_is_valid_slot_rejects_boundary(x1,x2,expected):
 
 @pytest.mark.boundary
 @pytest.mark.parametrize("x1,x2,expected",[
-    (0,"True",False),
-    (0,"False",False),
+    (0,True,False),
+    (0,False,False),
     (8,"2.0",False),
-    (8,"None",False),
+    (8,None,False),
 ])
 def test_is_valid_slot_rejects_boundary(x1,x2,expected):
     slot={"day":x1, "period": x2}
@@ -98,7 +100,7 @@ def test_is_valid_slot_rejects_boundary(x1,x2,expected):
 
 @pytest.mark.boundary
 @pytest.mark.parametrize("x1,x2,expected",[
-    (" ","True",False),
+    (" ",True,False),
     (0," ",False),
     ("None","2.0",False),
     (" "," ",False),
@@ -109,7 +111,7 @@ def test_is_valid_slot_rejects_missing_field(x1,x2,expected):
 
 @pytest.mark.boundary
 @pytest.mark.parametrize("x1,x2,expected",[
-    ("acc","True",False),
+    ("acc",True,False),
     ("0"," ",False),
     ([{"day": 2, "period": "3"}],"2.0",False),
     (" "," ",False),
@@ -188,4 +190,87 @@ def test_slots_overlap_rejects_invalid_slot(x1,x2,x3,x4,expected):
     assert slots_overlap(slot1,slot2)==expected
 
 
+@pytest.mark.normal
+@pytest.mark.parametrize("x1,expected",[
+   ("10:30",630),
+   ("12:00",720),
+   ("08:10",490),
+   ("21:10",1270),
+])
+def test_time_to_minutes_overlap_normal(x1,expected):
+    assert _time_to_minutes(x1)==expected
 
+
+@pytest.mark.boundary
+@pytest.mark.parametrize("x1,expected",[
+   ("00:00",0),
+   ("00:01",1),
+   ("23:59",1439),
+])
+def test_time_to_minutes_boundary(x1,expected):
+    assert _time_to_minutes(x1)==expected
+
+
+@pytest.mark.error
+@pytest.mark.parametrize("x1,expected",[
+   ("9:30",None),
+   ("10:30 ",None),
+   ("1a:30",None),
+   (["10:30"],None),
+   (" ",None),
+])
+def test_time_to_minutes_error(x1,expected):
+    assert _time_to_minutes(x1)==expected
+
+@pytest.mark.normal
+@pytest.mark.parametrize("a_start,a_end,b_start,b_end,expected", [
+    ("10:00", "11:00", "10:30", "11:30", True),
+    ("10:00", "11:00", "12:00", "13:00", False),
+    ("14:10", "15:00", "14:30", "16:00", True),
+    ("08:10", "09:00", "15:10", "16:00", False),
+])
+def test_time_ranges_overlap_normal(a_start, a_end, b_start, b_end, expected):
+    assert time_ranges_overlap(a_start, a_end, b_start, b_end) is expected
+    assert time_ranges_overlap(b_start, b_end, a_start, a_end) is expected
+
+
+@pytest.mark.boundary
+@pytest.mark.parametrize("a_start,a_end,b_start,b_end,expected", [
+    ("10:00", "11:00", "11:00", "12:00", False),   
+    ("10:00", "11:00", "10:00", "11:00", True),   
+    ("10:00", "11:00", "11:01", "12:00", False),  
+    ("10:00", "11:00", "10:00", "10:30", True),    
+    ("10:00", "11:00", "10:30", "11:00", True),  
+    ("00:00", "12:00", "12:00", "23:59", False),  
+    ("00:00", "23:59", "23:00", "23:59", True),  
+    ("08:10", "09:00", "09:00", "09:10", False),   
+])
+def test_time_ranges_overlap_boundary(a_start, a_end, b_start, b_end, expected):
+    assert time_ranges_overlap(a_start, a_end, b_start, b_end) is expected
+    assert time_ranges_overlap(b_start, b_end, a_start, a_end) is expected
+
+
+BAD_VALUES = ["9:30", "24:00", "10:60", "ab:cd", "", None, 1030]
+
+
+@pytest.mark.error
+@pytest.mark.parametrize("bad_value", BAD_VALUES)
+@pytest.mark.parametrize("position", [0, 1, 2, 3])
+def test_time_ranges_overlap_rejects_bad_value(position, bad_value):
+  
+    args = ["10:00", "11:00", "10:30", "11:30"]
+    args[position] = bad_value
+    assert time_ranges_overlap(*args) is False
+    assert time_ranges_overlap(args[2], args[3], args[0], args[1]) is False
+
+
+@pytest.mark.error
+@pytest.mark.parametrize("a_start,a_end,b_start,b_end", [
+    ("11:00", "10:00", "10:30", "11:30"),   # A 起訖顛倒
+    ("10:00", "11:00", "11:30", "10:30"),   # B 起訖顛倒
+    ("10:00", "10:00", "10:30", "11:30"),   # A 起訖相同
+    ("10:00", "11:00", "10:30", "10:30"),   # B 起訖相同
+])
+def test_time_ranges_overlap_rejects_bad_range(a_start, a_end, b_start, b_end):
+    assert time_ranges_overlap(a_start, a_end, b_start, b_end) is False
+    assert time_ranges_overlap(b_start, b_end, a_start, a_end) is False
