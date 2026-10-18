@@ -7,7 +7,7 @@ import copy
 
 from src.common.result import make_error, make_ok, make_result
 from src.common.check_room_conflict import check_room_conflict
-from src.common.time_slot import slots_overlap
+from src.common.periods import slots_overlap
 from src.common.validators import (VALID_CATEGORIES, validate_course, validate_room,
                                    validate_student)
 
