@@ -2,7 +2,7 @@ import copy
 import pytest
 
 from src.f1_data import add_course, add_student
-from src.f2_enrollment import check_enrollment
+from src.f2_enrollment import check_enrollment, drop, enroll
 from src.f1_data import add_course, add_student, cancel_course
 
 
@@ -270,3 +270,95 @@ def test_other_students_activity_not_counted(state):
     plant_activity(state, "115590002")
     result = check_enrollment(state, "115590001", "1150001")
     assert result["ok"] is True
+
+@pytest.mark.normal
+def test_enroll_success_adds_enrollment(state):
+    put_student(state)
+    put_course(state, "1150001")
+    result = enroll(state, "115590001", "1150001")
+    assert result["ok"] is True
+    assert ("115590001", "1150001") in state.enrollments
+    assert result["data"]["current_credits"] == 0
+    assert result["data"]["new_credits"] == 3
+
+
+@pytest.mark.error
+def test_enroll_failure_keeps_state_unchanged(state):
+    put_student(state)
+    put_course(state, "1150001", room_id="R101")
+    put_course(state, "1150002", room_id="R102", capacity=30)
+    state.enrollments.add(("115590001", "1150001"))
+    before = set(state.enrollments)
+    result = enroll(state, "115590001", "1150002")
+    assert [e["code"] for e in result["errors"]] == ["STUDENT_CONFLICT"]
+    assert state.enrollments == before
+
+
+@pytest.mark.error
+def test_enroll_unknown_student_not_found_state_unchanged(state):
+    put_course(state)
+    result = enroll(state, "115590099", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
+    assert state.enrollments == set()
+
+
+@pytest.mark.boundary
+def test_enroll_last_seat_then_next_student_full(state):
+    put_student(state)
+    put_student(state, "115590002")
+    put_course(state, "1150001", capacity=1)
+    assert enroll(state, "115590001", "1150001")["ok"] is True
+    result = enroll(state, "115590002", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["COURSE_FULL"]
+    assert state.enrollments == {("115590001", "1150001")}
+
+
+@pytest.mark.normal
+def test_drop_success_removes_enrollment_and_reports_credits(state):
+    put_student(state)
+    put_course(state, "1150001")
+    put_course(state, "1150002", slots=[{"day": 3, "period": "3"}])
+    state.enrollments.update({("115590001", "1150001"),
+                              ("115590001", "1150002")})
+    result = drop(state, "115590001", "1150002")
+    assert result["ok"] is True
+    assert state.enrollments == {("115590001", "1150001")}
+    assert result["data"]["current_credits"] == 3
+
+
+@pytest.mark.error
+def test_drop_not_enrolled_reports_not_enrolled(state):
+    put_student(state)
+    put_course(state)
+    result = drop(state, "115590001", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["NOT_ENROLLED"]
+    assert result["errors"][0]["detail"] == {
+        "student_id": "115590001", "course_id": "1150001"}
+
+
+@pytest.mark.error
+def test_drop_unknown_course_reports_not_found(state):
+    put_student(state)
+    result = drop(state, "115590001", "1159999")
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
+    assert result["errors"][0]["detail"] == {
+        "kind": "course", "course_id": "1159999"}
+
+
+@pytest.mark.error
+def test_drop_unknown_student_reports_not_found(state):
+    put_course(state)
+    result = drop(state, "115590099", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
+    assert result["errors"][0]["detail"] == {
+        "kind": "student", "student_id": "115590099"}
+
+
+@pytest.mark.normal
+def test_enroll_drop_then_enroll_again(state):
+    put_student(state)
+    put_course(state)
+    assert enroll(state, "115590001", "1150001")["ok"] is True
+    assert drop(state, "115590001", "1150001")["ok"] is True
+    assert state.enrollments == set()
+    assert enroll(state, "115590001", "1150001")["ok"] is True
