@@ -1,4 +1,5 @@
 from src.common.check_room_conflict import check_room_conflict
+from src.common.activity_time import activity_periods
 from src.common.periods import period_index, slots_overlap
 from src.common.result import make_error, make_result
 from src.common.validators import DEFAULT_CREDIT_LIMIT
@@ -71,6 +72,30 @@ def _room_conflict_errors(state, course_id):
     return result["errors"]
 
 
+def _student_activities(state, student_id):
+    """學生已報名且狀態有效的活動(依活動代號排序)。"""
+    return [state.activities[aid]
+            for sid, aid in sorted(state.activity_signups)
+            if sid == student_id and aid in state.activities
+            and state.activities[aid].get("status", "active") != "cancelled"]
+
+
+def _activity_conflict_errors(state, student_id, course_id):
+    """活動衝突:活動換算成節次後,與欲加選課程每個時段比對,每個衝突各一筆。"""
+    new_course = state.courses[course_id]
+    errors = []
+    for activity in _student_activities(state, student_id):
+        for day, period in activity_periods(activity):
+            for slot in new_course["slots"]:
+                if slots_overlap({"day": day, "period": period}, slot):
+                    errors.append(make_error(
+                        "ACTIVITY_CONFLICT", "與已報名活動衝突",
+                        {"day": slot["day"], "period": slot["period"],
+                         "with_id": activity["activity_id"],
+                         "with_name": activity["name"]}))
+    return errors
+    
+
 def _credit_limit_errors(current, new, limit):
     """學分上限:加選後學分大於上限才算超過(剛好等於上限通過)。"""
     if new > limit:
@@ -105,8 +130,8 @@ def check_enrollment(state, student_id, course_id):
     """檢查學生是否可以加選課程。
 
     Input: state、student_id、course_id
-    Process: 前置檢查,通過後執行學生衝堂、教室衝堂、學分上限、人數上限,
-             全部跑完再排序回傳
+    Process: 前置檢查,通過後執行學生衝堂、活動衝突、教室衝堂、學分上限、
+             人數上限,全部跑完再排序回傳
     Output: {ok, data, errors};data 含課程名稱、目前學分、加選後學分、學分上限
     Boundary: 前置檢查失敗只回傳該錯誤;學分剛好等於上限通過;剩 1 名額通過
     """
@@ -119,6 +144,7 @@ def check_enrollment(state, student_id, course_id):
     limit = state.students[student_id].get(
         "credit_limit", DEFAULT_CREDIT_LIMIT)
     errors = (_student_conflict_errors(state, student_id, course_id)
+              + _activity_conflict_errors(state, student_id, course_id)
               + _room_conflict_errors(state, course_id)
               + _credit_limit_errors(current, new, limit)
               + _course_full_errors(state, course_id))
