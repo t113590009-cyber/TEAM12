@@ -210,3 +210,63 @@ def test_credit_error_listed_before_full_error(state):
     result = check_enrollment(state, "115590001", "1150002")
     assert [e["code"] for e in result["errors"]] == [
         "CREDIT_LIMIT_EXCEEDED", "COURSE_FULL"]
+    
+def plant_activity(state, student_id, activity_id="A001", date="2026-10-20",
+                   start="10:30", end="10:50", status="active",
+                   name="程式設計讀書會"):
+    """直接植入一個活動並讓學生報名(F4 還沒做,繞過活動管理)。"""
+    state.activities[activity_id] = {
+        "activity_id": activity_id, "name": name, "date": date,
+        "start_time": start, "end_time": end, "expected_size": 10,
+        "activity_type": "study", "min_capacity": 0,
+        "required_equipment": [], "room_id": None, "status": status}
+    state.activity_signups.add((student_id, activity_id))
+
+
+@pytest.mark.error
+def test_activity_conflict_reports_overlapping_period(state):
+    put_student(state)
+    put_course(state, "1150001", slots=[{"day": 2, "period": "3"}])
+    plant_activity(state, "115590001")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["ACTIVITY_CONFLICT"]
+    assert result["errors"][0]["detail"] == {
+        "day": 2, "period": "3", "with_id": "A001",
+        "with_name": "程式設計讀書會"}
+
+
+@pytest.mark.boundary
+def test_activity_on_different_weekday_no_conflict(state):
+    put_student(state)
+    put_course(state, "1150001", slots=[{"day": 2, "period": "3"}])
+    plant_activity(state, "115590001", date="2026-10-21")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is True
+
+
+@pytest.mark.boundary
+def test_cancelled_activity_no_conflict(state):
+    put_student(state)
+    put_course(state, "1150001", slots=[{"day": 2, "period": "3"}])
+    plant_activity(state, "115590001", status="cancelled")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is True
+
+
+@pytest.mark.boundary
+def test_short_activity_between_periods_no_conflict(state):
+    put_student(state)
+    put_course(state, "1150001", slots=[{"day": 2, "period": "5"}])
+    plant_activity(state, "115590001", start="12:10", end="12:50")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is True
+
+
+@pytest.mark.boundary
+def test_other_students_activity_not_counted(state):
+    put_student(state)
+    put_student(state, "115590002")
+    put_course(state, "1150001", slots=[{"day": 2, "period": "3"}])
+    plant_activity(state, "115590002")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is True
