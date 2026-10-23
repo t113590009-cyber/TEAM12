@@ -2,6 +2,7 @@ import pytest
 
 from src.f1_data import add_course, add_student
 from src.f2_enrollment import check_enrollment
+from src.f1_data import add_course, add_student, cancel_course
 
 
 def put_student(state, student_id="115590001", credit_limit=24):
@@ -40,3 +41,33 @@ def test_unknown_course_reports_not_found(state):
     assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
     assert result["errors"][0]["detail"] == {
         "kind": "course", "course_id": "1159999"}
+
+@pytest.mark.error
+def test_cancelled_course_reports_course_cancelled(state):
+    put_student(state)
+    put_course(state)
+    cancel_course(state, "1150001")
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["COURSE_CANCELLED"]
+    assert result["errors"][0]["detail"] == {"course_id": "1150001"}
+
+
+@pytest.mark.error
+def test_already_enrolled_reports_already_enrolled(state):
+    put_student(state)
+    put_course(state)
+    state.enrollments.add(("115590001", "1150001"))
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["ALREADY_ENROLLED"]
+    assert result["errors"][0]["detail"] == {
+        "student_id": "115590001", "course_id": "1150001"}
+
+
+@pytest.mark.error
+def test_precheck_failure_returns_only_not_found(state):
+    put_course(state)
+    cancel_course(state, "1150001")
+    result = check_enrollment(state, "115590099", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
