@@ -1,3 +1,4 @@
+import copy
 import pytest
 
 from src.f1_data import add_course, add_student
@@ -134,3 +135,78 @@ def test_all_errors_listed_conflict_first_then_credit(state):
     assert [e["code"] for e in result["errors"]] == [
         "STUDENT_CONFLICT", "CREDIT_LIMIT_EXCEEDED"]
     assert result["data"]["new_credits"] == 6
+
+def plant_course(state, source_id, new_id, name="物理"):
+    """直接植入一門與來源課程同教室同時段的課(繞過 F1 的檢查)。"""
+    course = copy.deepcopy(state.courses[source_id])
+    course["course_id"] = new_id
+    course["name"] = name
+    state.courses[new_id] = course
+
+
+@pytest.mark.error
+def test_room_conflict_reports_conflicting_course(state):
+    put_student(state)
+    put_course(state, "1150001")
+    plant_course(state, "1150001", "1150002")
+    result = check_enrollment(state, "115590001", "1150002")
+    assert [e["code"] for e in result["errors"]] == ["ROOM_CONFLICT"]
+    assert result["errors"][0]["detail"] == {
+        "day": 2, "period": "3", "with_kind": "course",
+        "with_id": "1150001", "with_name": "微積分"}
+
+
+@pytest.mark.boundary
+def test_room_conflict_ignores_cancelled_course(state):
+    put_student(state)
+    put_course(state, "1150001")
+    plant_course(state, "1150001", "1150002")
+    cancel_course(state, "1150001")
+    result = check_enrollment(state, "115590001", "1150002")
+    assert result["ok"] is True
+
+
+@pytest.mark.error
+def test_room_and_student_conflict_same_slot_sorted_by_code(state):
+    put_student(state)
+    put_course(state, "1150001")
+    plant_course(state, "1150001", "1150002")
+    state.enrollments.add(("115590001", "1150001"))
+    result = check_enrollment(state, "115590001", "1150002")
+    assert [e["code"] for e in result["errors"]] == [
+        "ROOM_CONFLICT", "STUDENT_CONFLICT"]
+
+
+@pytest.mark.error
+def test_course_full_reports_detail(state):
+    put_student(state)
+    put_student(state, "115590002")
+    put_course(state, "1150001", capacity=1)
+    state.enrollments.add(("115590002", "1150001"))
+    result = check_enrollment(state, "115590001", "1150001")
+    assert [e["code"] for e in result["errors"]] == ["COURSE_FULL"]
+    assert result["errors"][0]["detail"] == {"enrolled": 1, "capacity": 1}
+
+
+@pytest.mark.boundary
+def test_one_seat_left_passes(state):
+    put_student(state)
+    put_student(state, "115590002")
+    put_course(state, "1150001", capacity=2)
+    state.enrollments.add(("115590002", "1150001"))
+    result = check_enrollment(state, "115590001", "1150001")
+    assert result["ok"] is True
+
+
+@pytest.mark.error
+def test_credit_error_listed_before_full_error(state):
+    put_student(state, credit_limit=5)
+    put_student(state, "115590002")
+    put_course(state, "1150001", credits=3)
+    put_course(state, "1150002", slots=[{"day": 3, "period": "3"}],
+               credits=3, capacity=1)
+    state.enrollments.add(("115590001", "1150001"))
+    state.enrollments.add(("115590002", "1150002"))
+    result = check_enrollment(state, "115590001", "1150002")
+    assert [e["code"] for e in result["errors"]] == [
+        "CREDIT_LIMIT_EXCEEDED", "COURSE_FULL"]
