@@ -1,7 +1,7 @@
 from src.common.check_room_conflict import check_room_conflict
 from src.common.activity_time import activity_periods
 from src.common.periods import period_index, slots_overlap
-from src.common.result import make_error, make_result
+from src.common.result import make_error, make_ok, make_result
 from src.common.validators import DEFAULT_CREDIT_LIMIT
 from src.f1_data import get_enrolled_students
 
@@ -153,3 +153,42 @@ def check_enrollment(state, student_id, course_id):
             "course_name": course["name"], "current_credits": current,
             "new_credits": new, "credit_limit": limit}
     return make_result(data, errors)
+
+def enroll(state, student_id, course_id):
+    """加選課程:五項檢查全部通過才加入選課紀錄。
+
+    Input: state、student_id、course_id
+    Process: 呼叫 check_enrollment,ok 才把 (student_id, course_id) 加入 enrollments
+    Output: 與 check_enrollment 相同的 {ok, data, errors};成功時 data.new_credits 即加選後學分
+    Boundary: 失敗時 state 完全不變
+    """
+    result = check_enrollment(state, student_id, course_id)
+    if result["ok"]:
+        state.enrollments.add((student_id, course_id))
+    return result
+
+
+def drop(state, student_id, course_id):
+    """退選課程。
+
+    Input: state、student_id、course_id
+    Process: 確認學生與課程存在、確實有選課紀錄,才移除選課紀錄
+    Output: {ok, data={student_id, course_id, current_credits}, errors};
+            current_credits 為退選後的學分
+    Boundary: 學生與課程都不存在回兩筆 NOT_FOUND;沒選過回 NOT_ENROLLED;
+              失敗時 state 不變
+    """
+    errors = []
+    if student_id not in state.students:
+        errors.append(_not_found("student", "student_id", student_id))
+    if course_id not in state.courses:
+        errors.append(_not_found("course", "course_id", course_id))
+    if errors:
+        return make_result(None, errors)
+    if (student_id, course_id) not in state.enrollments:
+        return make_result(None, [make_error(
+            "NOT_ENROLLED", "沒有選課紀錄",
+            {"student_id": student_id, "course_id": course_id})])
+    state.enrollments.discard((student_id, course_id))
+    return make_ok({"student_id": student_id, "course_id": course_id,
+                    "current_credits": _current_credits(state, student_id)})
