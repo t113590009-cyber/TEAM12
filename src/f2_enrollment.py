@@ -1,6 +1,10 @@
+from src.common.check_room_conflict import check_room_conflict
 from src.common.periods import period_index, slots_overlap
 from src.common.result import make_error, make_result
 from src.common.validators import DEFAULT_CREDIT_LIMIT
+from src.f1_data import get_enrolled_students
+
+NO_SLOT_ORDER = ("CREDIT_LIMIT_EXCEEDED", "COURSE_FULL")
 
 
 def _not_found(kind, key, value):
@@ -59,11 +63,29 @@ def _student_conflict_errors(state, student_id, course_id):
     return errors
 
 
+def _room_conflict_errors(state, course_id):
+    """教室衝堂:呼叫共用層 check_room_conflict,排除課程自己。"""
+    course = state.courses[course_id]
+    result = check_room_conflict(
+        state, course["room_id"], course["slots"], ignore_id=course_id)
+    return result["errors"]
+
+
 def _credit_limit_errors(current, new, limit):
     """學分上限:加選後學分大於上限才算超過(剛好等於上限通過)。"""
     if new > limit:
         return [make_error("CREDIT_LIMIT_EXCEEDED", "加選後學分超過上限",
                            {"current": current, "new": new, "limit": limit})]
+    return []
+
+
+def _course_full_errors(state, course_id):
+    """人數上限:目前修課人數已達上限就拒絕(剩 1 名額通過)。"""
+    enrolled = len(get_enrolled_students(state, course_id))
+    capacity = state.courses[course_id]["capacity"]
+    if enrolled >= capacity:
+        return [make_error("COURSE_FULL", "課程人數已達上限",
+                           {"enrolled": enrolled, "capacity": capacity})]
     return []
 
 
@@ -73,16 +95,20 @@ def _sort_key(error):
     if "day" in detail:
         return (0, detail["day"], period_index(detail["period"]),
                 error["code"], detail["with_id"])
-    return (1, 0, 0, error["code"], "")
+    code = error["code"]
+    rank = (NO_SLOT_ORDER.index(code) if code in NO_SLOT_ORDER
+            else len(NO_SLOT_ORDER))
+    return (1, rank, 0, code, "")
 
 
 def check_enrollment(state, student_id, course_id):
     """檢查學生是否可以加選課程。
 
     Input: state、student_id、course_id
-    Process: 前置檢查,通過後執行學生衝堂與學分上限,全部跑完再排序回傳
+    Process: 前置檢查,通過後執行學生衝堂、教室衝堂、學分上限、人數上限,
+             全部跑完再排序回傳
     Output: {ok, data, errors};data 含課程名稱、目前學分、加選後學分、學分上限
-    Boundary: 前置檢查失敗只回傳該錯誤;學分剛好等於上限通過
+    Boundary: 前置檢查失敗只回傳該錯誤;學分剛好等於上限通過;剩 1 名額通過
     """
     pre_errors = _precheck_errors(state, student_id, course_id)
     if pre_errors:
@@ -93,7 +119,9 @@ def check_enrollment(state, student_id, course_id):
     limit = state.students[student_id].get(
         "credit_limit", DEFAULT_CREDIT_LIMIT)
     errors = (_student_conflict_errors(state, student_id, course_id)
-              + _credit_limit_errors(current, new, limit))
+              + _room_conflict_errors(state, course_id)
+              + _credit_limit_errors(current, new, limit)
+              + _course_full_errors(state, course_id))
     errors.sort(key=_sort_key)
     data = {"student_id": student_id, "course_id": course_id,
             "course_name": course["name"], "current_credits": current,
