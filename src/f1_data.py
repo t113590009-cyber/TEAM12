@@ -22,6 +22,34 @@ def get_enrolled_students(state, course_id):
     return sorted(sid for sid, cid in state.enrollments if cid == course_id)
 
 
+def _active_course_ids(state, student_id):
+    """學生已選且仍有效（active）的課號，排序後回傳；供已選課程與學分共用。"""
+    return sorted(cid for sid, cid in state.enrollments
+                  if sid == student_id and cid in state.courses
+                  and state.courses[cid].get("status", "active") == "active")
+
+
+def get_student_courses(state, student_id):
+    """Input: state、學號。
+    Process: 由 enrollments 推導該學生已選課程，只含 active 課程。
+    Output: {ok, data=課號清單（依課號排序）, errors}。
+    Boundary: 學生不存在回 NOT_FOUND；沒選課回 ok=True、data=[]；已取消課程不列入。"""
+    if student_id not in state.students:
+        return _not_found("student", "student_id", student_id)
+    return make_ok(_active_course_ids(state, student_id))
+
+
+def get_student_credits(state, student_id):
+    """Input: state、學號。
+    Process: 加總該學生已選 active 課程的學分（活動不計）。
+    Output: {ok, data=目前學分（int）, errors}。
+    Boundary: 學生不存在回 NOT_FOUND；沒選課回 ok=True、data=0；已取消課程不計。"""
+    if student_id not in state.students:
+        return _not_found("student", "student_id", student_id)
+    total = sum(state.courses[cid]["credits"] for cid in _active_course_ids(state, student_id))
+    return make_ok(total)
+
+
 # AI修改：新增與修改共用同一個教室衝堂檢查，已取消課程不檢查
 def _room_conflict(state, course):
     """有效課程才檢查教室衝堂；回傳 check_room_conflict 的結果。"""

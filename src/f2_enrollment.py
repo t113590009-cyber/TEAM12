@@ -3,7 +3,7 @@ from src.common.activity_time import activity_periods
 from src.common.periods import period_index, slots_overlap
 from src.common.result import make_error, make_ok, make_result
 from src.common.validators import DEFAULT_CREDIT_LIMIT
-from src.f1_data import get_enrolled_students
+from src.f1_data import get_enrolled_students, get_student_courses, get_student_credits
 
 NO_SLOT_ORDER = ("CREDIT_LIMIT_EXCEEDED", "COURSE_FULL")
 
@@ -36,23 +36,16 @@ def _precheck_errors(state, student_id, course_id):
     return []
 
 
-def _student_courses(state, student_id):
-    """暫時版:由 enrollments 推導學生已選的有效課程,F1 提供後替換。"""
-    return [state.courses[cid] for sid, cid in sorted(state.enrollments)
-            if sid == student_id and cid in state.courses
-            and state.courses[cid].get("status", "active") != "cancelled"]
-
-
-def _current_credits(state, student_id):
-    """暫時版:已選有效課程的學分加總(活動不計),F1 提供後替換。"""
-    return sum(c["credits"] for c in _student_courses(state, student_id))
-
-
 def _student_conflict_errors(state, student_id, course_id):
-    """學生衝堂:每個衝突時段、每門衝突課程各一筆。"""
+    """學生衝堂:每個衝突時段、每門衝突課程各一筆。
+
+    已選課程由 F1 的 get_student_courses 取得(只含有效課程);
+    呼叫前須已通過前置檢查,學生一定存在。
+    """
     new_course = state.courses[course_id]
     errors = []
-    for existing in _student_courses(state, student_id):
+    for existing_id in get_student_courses(state, student_id)["data"]:
+        existing = state.courses[existing_id]
         for old_slot in existing["slots"]:
             for new_slot in new_course["slots"]:
                 if slots_overlap(old_slot, new_slot):
@@ -94,7 +87,7 @@ def _activity_conflict_errors(state, student_id, course_id):
                          "with_id": activity["activity_id"],
                          "with_name": activity["name"]}))
     return errors
-    
+
 
 def _credit_limit_errors(current, new, limit):
     """學分上限:加選後學分大於上限才算超過(剛好等於上限通過)。"""
@@ -131,7 +124,7 @@ def check_enrollment(state, student_id, course_id):
 
     Input: state、student_id、course_id
     Process: 前置檢查,通過後執行學生衝堂、活動衝突、教室衝堂、學分上限、
-             人數上限,全部跑完再排序回傳
+             人數上限,全部跑完再排序回傳;目前學分由 F1 的 get_student_credits 取得
     Output: {ok, data, errors};data 含課程名稱、目前學分、加選後學分、學分上限
     Boundary: 前置檢查失敗只回傳該錯誤;學分剛好等於上限通過;剩 1 名額通過
     """
@@ -139,7 +132,7 @@ def check_enrollment(state, student_id, course_id):
     if pre_errors:
         return make_result(None, pre_errors)
     course = state.courses[course_id]
-    current = _current_credits(state, student_id)
+    current = get_student_credits(state, student_id)["data"]
     new = current + course["credits"]
     limit = state.students[student_id].get(
         "credit_limit", DEFAULT_CREDIT_LIMIT)
@@ -153,6 +146,7 @@ def check_enrollment(state, student_id, course_id):
             "course_name": course["name"], "current_credits": current,
             "new_credits": new, "credit_limit": limit}
     return make_result(data, errors)
+
 
 def enroll(state, student_id, course_id):
     """加選課程:五項檢查全部通過才加入選課紀錄。
@@ -172,7 +166,8 @@ def drop(state, student_id, course_id):
     """退選課程。
 
     Input: state、student_id、course_id
-    Process: 確認學生與課程存在、確實有選課紀錄,才移除選課紀錄
+    Process: 確認學生與課程存在、確實有選課紀錄,才移除選課紀錄;
+             退選後學分由 F1 的 get_student_credits 取得
     Output: {ok, data={student_id, course_id, current_credits}, errors};
             current_credits 為退選後的學分
     Boundary: 學生與課程都不存在回兩筆 NOT_FOUND;沒選過回 NOT_ENROLLED;
@@ -191,4 +186,4 @@ def drop(state, student_id, course_id):
             {"student_id": student_id, "course_id": course_id})])
     state.enrollments.discard((student_id, course_id))
     return make_ok({"student_id": student_id, "course_id": course_id,
-                    "current_credits": _current_credits(state, student_id)})
+                    "current_credits": get_student_credits(state, student_id)["data"]})
