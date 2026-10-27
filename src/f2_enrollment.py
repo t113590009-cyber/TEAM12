@@ -3,7 +3,7 @@ from src.common.activity_time import activity_periods
 from src.common.periods import period_index, slots_overlap
 from src.common.result import make_error, make_ok, make_result
 from src.common.validators import DEFAULT_CREDIT_LIMIT
-from src.f1_data import get_enrolled_students
+from src.f1_data import get_enrolled_students, get_student_courses, get_student_credits
 
 NO_SLOT_ORDER = ("CREDIT_LIMIT_EXCEEDED", "COURSE_FULL")
 
@@ -37,16 +37,20 @@ def _precheck_errors(state, student_id, course_id):
 
 
 def _student_courses(state, student_id):
-    """暫時版:由 enrollments 推導學生已選的有效課程,F1 提供後替換。"""
-    return [state.courses[cid] for sid, cid in sorted(state.enrollments)
-            if sid == student_id and cid in state.courses
-            and state.courses[cid].get("status", "active") != "cancelled"]
+    """學生已選的有效課程 dict 清單。
+
+    Input: state、student_id(須已通過前置檢查,確定存在)
+    Process: 由 F1 的 get_student_courses 取得課號,再轉成課程
+    Output: 課程 dict 清單(依課號排序)
+    Boundary: 沒選課回 []
+    """
+    ids = get_student_courses(state, student_id)["data"]
+    return [state.courses[cid] for cid in ids]
 
 
 def _current_credits(state, student_id):
-    """暫時版:已選有效課程的學分加總(活動不計),F1 提供後替換。"""
-    return sum(c["credits"] for c in _student_courses(state, student_id))
-
+    """學生目前學分,由 F1 的 get_student_credits 取得(活動不計)。"""
+    return get_student_credits(state, student_id)["data"]
 
 def _student_conflict_errors(state, student_id, course_id):
     """學生衝堂:每個衝突時段、每門衝突課程各一筆。"""
