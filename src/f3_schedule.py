@@ -9,7 +9,8 @@ def add_schedule_item(student_id, course_id, weekday, period):
     if not student_id:
         return {"ok": False, "data": None, "errors": ["student_id is empty"]}
 
-    if not is_valid_slot(period):
+    new_slot = {"day": weekday, "period": period}
+    if not is_valid_slot(new_slot):
         return {"ok": False, "data": None, "errors": ["invalid period"]}
 
     # 檢查這個學生已經有的課，有沒有衝突
@@ -22,7 +23,11 @@ def add_schedule_item(student_id, course_id, weekday, period):
     }
 
     for item in student_items:
-        if item["weekday"] == weekday and slots_overlap(item["period"], period):
+        existing_slot = {
+            "day": item["weekday"],
+            "period": item["period"],
+        }
+        if slots_overlap(existing_slot, new_slot):
             return {"ok": False, "data": None, "errors": ["time slot conflict"]}
 
     _schedule_data.append(new_item)
@@ -39,6 +44,7 @@ def remove_schedule_item(student_id, course_id, weekday, period):
                 and item["period"] == period):
             target = item
             break
+
     if target is None:
         return {"ok": False, "data": None, "errors": ["schedule item not found"]}
 
