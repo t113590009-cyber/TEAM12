@@ -1,4 +1,4 @@
-from src.common.time_slot import is_valid_slot, slots_overlap
+from src.common.periods import is_valid_slot, slots_overlap
 
 # 用來存所有學生課表，正式版本會改成讀寫JSON
 _schedule_data = []
