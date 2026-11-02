@@ -1,7 +1,10 @@
 import datetime
 
 from src.common.periods import period_index, time_ranges_overlap
-from src.common.time_slot import PERIOD_TABLE
+from src.common.time_slot import PERIOD_TABLE, period_time_range
+
+# 依節次索引排序的全部節次，只算一次
+_ALL_PERIODS = tuple(sorted(PERIOD_TABLE, key=period_index))
 
 
 def is_valid_date(date):
@@ -19,16 +22,6 @@ def is_valid_date(date):
     return True
 
 
-def _all_periods():
-    return sorted(PERIOD_TABLE, key=period_index)
-
-
-def _period_time_range(period):
-    """回傳節次的 (開始, 結束) HH:MM。"""
-    _, start, end = PERIOD_TABLE[period]
-    return start, end
-
-
 def activity_periods(activity):
     if not isinstance(activity, dict):
         return []
@@ -41,8 +34,8 @@ def activity_periods(activity):
         return []
     day = datetime.date.fromisoformat(date).isoweekday()
     result = []
-    for period in _all_periods():
-        p_start, p_end = _period_time_range(period)
+    for period in _ALL_PERIODS:
+        p_start, p_end = period_time_range(period)
         if time_ranges_overlap(start, end, p_start, p_end):
             result.append((day, period))
     return result
