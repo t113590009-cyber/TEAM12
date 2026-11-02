@@ -1,10 +1,11 @@
 from types import MappingProxyType
 
-# 節次字串 -> 索引（資料格式書 2.1），唯讀
-PERIOD_TABLE = MappingProxyType({
-    "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6,
-    "7": 7, "8": 8, "9": 9, "a": 10, "b": 11, "c": 12,
-})
+from src.common.time_slot import PERIOD_TABLE
+
+# 節次字串 -> 索引（資料格式書 2.1），由 time_slot.PERIOD_TABLE 推導，唯讀
+_PERIOD_INDEX = MappingProxyType(
+    {period: index for period, (index, _, _) in PERIOD_TABLE.items()}
+)
 _DIGITS = "0123456789"
 
 
@@ -12,7 +13,7 @@ def period_index(period):
     """節次 -> 索引 1～12。
 
     Input: period，整數 1～9 或字串 "1"～"9"、"a"～"c"（大小寫皆可）。
-    Process: 整數轉字串、字串轉小寫後查 PERIOD_TABLE。
+    Process: 整數轉字串、字串轉小寫後查 _PERIOD_INDEX。
     Output: 索引 1～12。
     Boundary: 非法值（0、10、"d"、None、bool、float 等）回傳 None。
     """
@@ -22,7 +23,7 @@ def period_index(period):
         key = period.lower()
     else:
         return None
-    return PERIOD_TABLE.get(key)
+    return _PERIOD_INDEX.get(key)
 
 
 def is_valid_slot(slot):

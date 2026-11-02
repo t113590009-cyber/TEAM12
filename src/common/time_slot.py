@@ -1,6 +1,6 @@
-from src.common.periods import period_index
 """時段與節次共用函式 — F1~F5、F7 共用"""
 
+# 節次 -> (索引, 開始, 結束)，全專案唯一的節次資料來源
 PERIOD_TABLE = {
     "1": (1, "08:10", "09:00"),
     "2": (2, "09:10", "10:00"),
@@ -16,3 +16,8 @@ PERIOD_TABLE = {
     "c": (12, "20:20", "21:10"),
 }
 
+
+def period_time_range(period):
+    """回傳節次的 (開始, 結束) HH:MM。"""
+    _, start, end = PERIOD_TABLE[period]
+    return start, end

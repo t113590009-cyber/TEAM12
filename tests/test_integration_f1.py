@@ -112,6 +112,7 @@ def test_delete_course_in_use(state):
     }
 
     assert add_student(state, student)["ok"] is True
+    # 尚無選課 API，先直接寫入 state；選課功能完成後改走正式流程
     state.enrollments.add(("115590001", "1150001"))
 
     result = delete_course(state, "1150001")
