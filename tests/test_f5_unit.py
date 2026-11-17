@@ -131,3 +131,47 @@ def test_multiple_reasons_listed_in_alphabetical_order(state):
         state, criteria(blocked_slots=[{"day": 2, "period": "3"}]))["data"]
     assert data["excluded"] == [
         {"course_id": "1150001", "reasons": ["BLOCKED_SLOT", "FULL"]}]
+
+@pytest.mark.normal
+def test_wanted_courses_listed_first(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    put_course(state, "1150002", [{"day": 3, "period": "3"}])
+    put_course(state, "1150003", [{"day": 4, "period": "3"}])
+    data = filter_courses(state, criteria(wanted_courses=["1150003"]))["data"]
+    assert ids(data["candidates"]) == ["1150003", "1150001", "1150002"]
+    assert data["candidates"][0]["wanted"] is True
+
+
+@pytest.mark.normal
+def test_preferred_day_courses_listed_before_others(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    put_course(state, "1150002", [{"day": 3, "period": "3"}])
+    data = filter_courses(state, criteria(preferred_days=[3]))["data"]
+    assert ids(data["candidates"]) == ["1150002", "1150001"]
+    assert data["candidates"][0]["preferred_day"] is True
+    assert data["candidates"][1]["preferred_day"] is False
+
+
+@pytest.mark.normal
+def test_wanted_before_preferred_before_course_id(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    put_course(state, "1150002", [{"day": 3, "period": "3"}])
+    put_course(state, "1150003", [{"day": 4, "period": "3"}])
+    data = filter_courses(
+        state, criteria(wanted_courses=["1150003"], preferred_days=[3]))["data"]
+    assert ids(data["candidates"]) == ["1150003", "1150002", "1150001"]
+
+
+@pytest.mark.boundary
+def test_preferred_day_needs_all_slots_on_preferred_days(state):
+    put_student(state)
+    put_course(state, "1150001",
+               [{"day": 2, "period": "3"}, {"day": 3, "period": "3"}])
+    put_course(state, "1150002", [{"day": 2, "period": "4"}])
+    data = filter_courses(state, criteria(preferred_days=[2]))["data"]
+    flags = {row["course_id"]: row["preferred_day"]
+             for row in data["candidates"]}
+    assert flags == {"1150001": False, "1150002": True}
