@@ -38,6 +38,9 @@ def _candidate_row(course, wanted, preferred_days):
             "credits": course["credits"], "wanted": wanted,
             "preferred_day": bool(preferred_days) and days <= preferred_days}
 
+def _rank_key(row):
+    """候選排序:希望課程優先,其次偏好星期,最後依課號。"""
+    return (not row["wanted"], not row["preferred_day"], row["course_id"])
 
 def _split_courses(state, student_id, criteria):
     """把全部課程分成候選清單與排除清單,各依課號排序。"""
@@ -52,6 +55,7 @@ def _split_courses(state, student_id, criteria):
         else:
             candidates.append(_candidate_row(
                 state.courses[course_id], course_id in wanted, preferred))
+    candidates.sort(key=_rank_key)
     return candidates, excluded
 
 
