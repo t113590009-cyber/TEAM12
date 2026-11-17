@@ -5,6 +5,7 @@ F1 新增／修改與 F6 載入共用；只驗證、不修改 state，回傳 {ok
 """
 import re
 
+from src.common.activity_time import is_valid_date
 from src.common.result import make_error, make_result
 
 DEFAULT_CREDIT_LIMIT = 24
@@ -14,6 +15,10 @@ PERIOD_CHARS = "123456789abc"
 COURSE_ID_RE = re.compile(r"[0-9]{7}")
 STUDENT_ID_RE = re.compile(r"[0-9]{9}")
 ROOM_ID_RE = re.compile(r"R[0-9]{3}")
+ACTIVITY_ID_RE = re.compile(r"A[0-9]{3}")
+TIME_RE = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
+ACTIVITY_EARLIEST = "08:10"
+ACTIVITY_LATEST = "21:10"
 
 
 def is_valid_id(value, pattern):
@@ -175,13 +180,13 @@ def validate_student(state, data, is_new=True):
 
 
 # AI實作：設備清單檢查（小寫、不重複）
-def _check_equipment(equipment, errors):
-    """設備清單：元素為非空小寫字串且不重複。"""
+def _check_equipment(equipment, errors, field="equipment"):
+    """設備清單：元素為非空小寫字串且不重複（教室 equipment、活動 required_equipment 共用）。"""
     ok = isinstance(equipment, list) and all(
         isinstance(item, str) and item and item == item.lower() and item.strip() == item
         for item in equipment) and len(set(equipment)) == len(equipment)
     if not ok:
-        errors.append(make_error("INVALID_FIELD", "設備清單不合法", {"field": "equipment"}))
+        errors.append(make_error("INVALID_FIELD", "設備清單不合法", {"field": field}))
         return None
     return list(equipment)
 
@@ -201,3 +206,72 @@ def validate_room(state, data, is_new=True):
         return make_result(None, errors)
     return make_result({"room_id": room_id, "building": building,
                         "capacity": capacity, "equipment": equipment}, [])
+
+
+def _check_activity_time(data, errors):
+    """start_time、end_time 須為 HH:MM，且 08:10 <= start < end <= 21:10。回傳 (start, end)。"""
+    start, end = data.get("start_time"), data.get("end_time")
+    valid = True
+    for field, value in (("start_time", start), ("end_time", end)):
+        if not isinstance(value, str) or TIME_RE.fullmatch(value) is None:
+            errors.append(make_error("INVALID_TIME", "時間格式不合法", {"field": field, "value": value}))
+            valid = False
+    if not valid:
+        return None, None
+    # HH:MM 補零後字串大小與時間先後一致，可直接比較
+    if not ACTIVITY_EARLIEST <= start < end <= ACTIVITY_LATEST:
+        errors.append(make_error("INVALID_TIME", "時間起訖顛倒或超出 08:10～21:10",
+                                 {"start_time": start, "end_time": end}))
+        return None, None
+    return start, end
+
+
+def _check_min_capacity(value, errors):
+    """場地最低容量：非 bool 整數、>= 0，預設 0。"""
+    if not is_int_value(value) or int(value) < 0:
+        errors.append(make_error("INVALID_CAPACITY", "最低容量必須為 0 以上整數",
+                                 {"field": "min_capacity", "value": value}))
+        return None
+    return int(value)
+
+
+def _check_activity_room(state, data, errors):
+    """活動教室可為 None（尚未配置）；有值時須為已存在的教室。"""
+    room_id = data.get("room_id")
+    if room_id is None:
+        return None
+    if not isinstance(room_id, str):
+        errors.append(make_error("INVALID_FIELD", "欄位缺漏或不合法", {"field": "room_id"}))
+    elif room_id not in state.rooms:
+        errors.append(make_error("NOT_FOUND", "指定的教室不存在", {"room_id": room_id}))
+    return room_id
+
+
+def validate_activity(state, data, is_new=True):
+    """Input: state、活動 dict、is_new（新增才檢查重複代號）。
+    Process: 跑完全部欄位驗證（資料格式書 4.4、第 5 章），不修改 state。
+    Output: {ok, data=標準化新 dict, errors}；失敗時 data 為 None。
+    Boundary: 代號非 A+3 位數字、日期 2026-02-30、時間 8:10／08:00 開始／21:20 結束／起訖顛倒、
+    預計人數 0 或 True、最低容量 -1、設備大寫或重複、不存在的教室；room_id 可為 None。"""
+    if not isinstance(data, dict):
+        return make_result(None, [make_error("INVALID_FIELD", "資料必須為 dict", {"field": "activity"})])
+    errors = []
+    activity_id = _check_id(data, "activity_id", ACTIVITY_ID_RE, state.activities, is_new, errors)
+    name = _check_text(data, "name", errors)
+    date = data.get("date")
+    if not is_valid_date(date):
+        errors.append(make_error("INVALID_DATE", "日期不合法", {"field": "date", "value": date}))
+    start, end = _check_activity_time(data, errors)
+    expected = _check_positive_int(data.get("expected_size"), "INVALID_CAPACITY", "expected_size", errors)
+    activity_type = _check_text(data, "activity_type", errors)
+    min_capacity = _check_min_capacity(data.get("min_capacity", 0), errors)
+    equipment = _check_equipment(data.get("required_equipment", []), errors, "required_equipment")
+    room_id = _check_activity_room(state, data, errors)
+    status = _check_status(data, errors)
+    if errors:
+        return make_result(None, errors)
+    return make_result({"activity_id": activity_id, "name": name, "date": date,
+                        "start_time": start, "end_time": end, "expected_size": expected,
+                        "activity_type": activity_type, "min_capacity": min_capacity,
+                        "required_equipment": equipment, "room_id": room_id,
+                        "status": status}, [])
