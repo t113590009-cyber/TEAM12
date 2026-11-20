@@ -141,20 +141,21 @@ def _required_over_max_errors(state, student_id, pending, max_credits):
                                max_credits=max_credits)]
     return []
 
+
 def _min_credit_unreachable_errors(state, student_id, candidates, min_credits, max_credits):
-    """已選學分加候選課程學分總和低於學分下限（僅在下限小於等於上限時檢查）。"""
+    """已選學分加候選課程學分總和低於學分下限（獨立錯誤碼 MIN_CREDIT_UNREACHABLE）。"""
     if min_credits > max_credits:
         return []
     current = get_student_credits(state, student_id)["data"]
-    max_possible = current + sum(c["credits"] for c in candidates)
-    if max_possible < min_credits:
-        return [_contradiction("MIN_CREDIT_UNREACHABLE",
-                               min_credits=min_credits,
-                               max_possible=max_possible)]
+    max_reachable = current + sum(c["credits"] for c in candidates)
+    if max_reachable < min_credits:
+        return [make_error("MIN_CREDIT_UNREACHABLE", "可選學分不足以達到學分下限",
+                           {"min_credits": min_credits, "max_reachable": max_reachable})]
     return []
 
+
 def _contradiction_errors(state, student_id, criteria, candidates):
-    """七種條件矛盾各自檢查,全部跑完再依固定順序回傳。"""
+    """六種條件矛盾與學分不足各自檢查,全部跑完再依固定順序回傳。"""
     max_credits = _effective_max(state, student_id, criteria)
     pending = _pending_required(state, student_id, criteria)
     blocked = criteria.get("blocked_slots", [])
@@ -169,42 +170,65 @@ def _contradiction_errors(state, student_id, criteria, candidates):
 
 
 def _validate_criteria(state, criteria):
-    """輸入驗證:欄位缺漏、學生存在、星期範圍、時段格式、不存在的課號。
+    """輸入驗證:型態檢查、欄位缺漏、學生存在、星期範圍、時段格式、不存在或已取消課號。"""
+    if not isinstance(criteria, dict):
+        return [make_error("INVALID_FIELD", "資料必須為 dict", {"field": "criteria"})]
 
-    Input: state、criteria
-    Process: 依序檢查各項前置條件,有問題全數收集後回傳
-    Output: 錯誤清單,全部通過回 []
-    """
     errors = []
-    if not isinstance(criteria, dict) or "student_id" not in criteria:
+    if "student_id" not in criteria or not isinstance(criteria["student_id"], str):
         errors.append(make_error("INVALID_FIELD", "欄位缺漏或不合法", {"field": "student_id"}))
     elif criteria["student_id"] not in state.students:
         errors.append(make_error(
             "NOT_FOUND", "找不到資料",
             {"kind": "student", "student_id": criteria["student_id"]}))
 
-    for day in criteria.get("preferred_days", []):
-        if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 7:
-            errors.append(make_error("INVALID_PERIOD", "星期不合法", {"day": day}))
+    for field in ("min_credits", "max_credits"):
+        if field in criteria:
+            val = criteria[field]
+            if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+                errors.append(make_error("INVALID_CREDIT", "學分數值必須為非負整數",
+                                         {"field": field, "value": val}))
 
-    for slot in criteria.get("blocked_slots", []):
-        if normalize_slot(slot) is None:
-            errors.append(make_error("INVALID_PERIOD", "星期或節次不合法", {"slot": slot}))
+    if "preferred_days" in criteria:
+        if not isinstance(criteria["preferred_days"], list):
+            errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": "preferred_days"}))
+        else:
+            for day in criteria["preferred_days"]:
+                if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 7:
+                    errors.append(make_error("INVALID_PERIOD", "星期不合法", {"day": day}))
+
+    if "blocked_slots" in criteria:
+        if not isinstance(criteria["blocked_slots"], list):
+            errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": "blocked_slots"}))
+        else:
+            for slot in criteria["blocked_slots"]:
+                if normalize_slot(slot) is None:
+                    errors.append(make_error("INVALID_PERIOD", "星期或節次不合法", {"slot": slot}))
 
     for field in ("required_courses", "wanted_courses"):
-        for course_id in criteria.get(field, []):
-            if course_id not in state.courses:
-                errors.append(make_error(
-                    "NOT_FOUND", "找不到資料",
-                    {"kind": "course", "course_id": course_id}))
+        if field in criteria:
+            if not isinstance(criteria[field], list):
+                errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": field}))
+            else:
+                for course_id in criteria[field]:
+                    course = state.courses.get(course_id)
+                    if course is None:
+                        errors.append(make_error(
+                            "NOT_FOUND", "找不到資料",
+                            {"kind": "course", "course_id": course_id}))
+                    elif field == "required_courses" and course.get("status") == "cancelled":
+                        errors.append(make_error(
+                            "COURSE_CANCELLED", "必修課程已取消",
+                            {"course_id": course_id}))
 
     return errors
+
 
 def filter_courses(state, criteria):
     """依個人條件篩選候選課程並檢查條件是否矛盾。
 
     Input: state、criteria(學號、希望課程、必修、學分上下限、不可上課時段、偏好星期)
-    Process: 先做輸入驗證;通過才做基本過濾與七種條件矛盾檢查
+    Process: 先做輸入驗證;通過才做基本過濾與條件檢查
     Output: {ok, data={student_id, candidates, excluded, feasible}, errors}
     Boundary: 輸入驗證失敗 data 為 None;有矛盾時 feasible 為 False 但 data 仍保留
     """

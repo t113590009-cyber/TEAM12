@@ -286,16 +286,15 @@ def test_all_contradictions_listed_together_in_fixed_order(state):
 
 @pytest.mark.error
 def test_min_credit_unreachable_reports_contradiction(state):
-    """候選課程學分總和低於學分下限，回報 MIN_CREDIT_UNREACHABLE 且 feasible 為 False。"""
+    """候選課程學分總和低於學分下限，回報獨立錯誤碼 MIN_CREDIT_UNREACHABLE。"""
     put_student(state)
     put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
     result = filter_courses(state, criteria(min_credits=5))
     assert result["ok"] is False
-    assert [e["code"] for e in result["errors"]] == ["CONSTRAINT_CONTRADICTION"]
+    assert [e["code"] for e in result["errors"]] == ["MIN_CREDIT_UNREACHABLE"]
     assert result["errors"][0]["detail"] == {
-        "reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 5, "max_possible": 3}
+        "min_credits": 5, "max_reachable": 3}
     assert result["data"]["feasible"] is False
-    # 仍保留候選清單供使用者參考
     assert ids(result["data"]["candidates"]) == ["1150001"]
 @pytest.mark.error
 def test_min_credit_unreachable_considers_enrolled_credits(state):
@@ -305,8 +304,9 @@ def test_min_credit_unreachable_considers_enrolled_credits(state):
     put_course(state, "1150002", [{"day": 3, "period": "3"}], credits=3)
     enroll(state, "115590001", "1150001")  # 已選 3 學分
     result = filter_courses(state, criteria(min_credits=8))  # 已選 3 + 候選 3 = 6 < 8
+    assert [e["code"] for e in result["errors"]] == ["MIN_CREDIT_UNREACHABLE"]
     assert [e["detail"] for e in result["errors"]] == [
-        {"reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 8, "max_possible": 6}]
+        {"min_credits": 8, "max_reachable": 6}]
     assert result["data"]["feasible"] is False
 @pytest.mark.boundary
 def test_min_credit_reachable_when_equal(state):
@@ -323,15 +323,23 @@ def test_excluded_courses_do_not_count_towards_max_possible(state):
     """被排除的課程（例如衝堂、額滿）不應計入可能達到的學分上限。"""
     put_student(state)
     put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
-    # 這裡加上 room_id="R102"，避免同教室衝堂
     put_course(state, "1150002", [{"day": 2, "period": "3"}], room_id="R102", credits=3)
     enroll(state, "115590001", "1150001")  # 已選 0001，0002 被排除（CONFLICT_ENROLLED）
-    # 目前已選 3 學分，候選 0 學分，上限為 3
     result = filter_courses(state, criteria(min_credits=5))
+    assert [e["code"] for e in result["errors"]] == ["MIN_CREDIT_UNREACHABLE"]
     assert [e["detail"] for e in result["errors"]] == [
-        {"reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 5, "max_possible": 3}]
+        {"min_credits": 5, "max_reachable": 3}]
     assert result["data"]["feasible"] is False
-
+# ----------------------------------------------------------------------
+# 第五輪：輸入驗證測試（欄位缺漏、星期範圍、不存在/已取消課號、型態防護）
+# ----------------------------------------------------------------------
+@pytest.mark.error
+def test_criteria_none_reports_invalid_field(state):
+    """criteria 為 None 回報 INVALID_FIELD 不當機。"""
+    result = filter_courses(state, None)
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
 @pytest.mark.error
 def test_missing_student_id_reports_invalid_field(state):
     """criteria 缺少必要欄位 student_id 回報 INVALID_FIELD 且 data 為 None。"""
@@ -340,8 +348,21 @@ def test_missing_student_id_reports_invalid_field(state):
     assert result["data"] is None
     assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
     assert result["errors"][0]["detail"] == {"field": "student_id"}
-
-
+@pytest.mark.error
+def test_non_list_fields_report_invalid_field(state):
+    """preferred_days 非 list 回報 INVALID_FIELD。"""
+    put_student(state)
+    result = filter_courses(state, criteria(preferred_days=3))
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
+    assert result["errors"][0]["detail"] == {"field": "preferred_days"}
+@pytest.mark.error
+def test_invalid_credit_types_and_negative_report_error(state):
+    """min_credits 為字串或負數回報 INVALID_CREDIT。"""
+    put_student(state)
+    result = filter_courses(state, criteria(min_credits="15"))
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["INVALID_CREDIT"]
 @pytest.mark.error
 def test_preferred_days_out_of_range_reports_invalid_period(state):
     """preferred_days 包含超出 1~7 範圍的星期回報 INVALID_PERIOD。"""
@@ -351,8 +372,6 @@ def test_preferred_days_out_of_range_reports_invalid_period(state):
     assert result["data"] is None
     assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
     assert result["errors"][0]["detail"] == {"day": 8}
-
-
 @pytest.mark.error
 def test_blocked_slots_invalid_slot_reports_invalid_period(state):
     """blocked_slots 包含非法星期或節次回報 INVALID_PERIOD。"""
@@ -363,8 +382,6 @@ def test_blocked_slots_invalid_slot_reports_invalid_period(state):
     assert result["data"] is None
     assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
     assert result["errors"][0]["detail"] == {"slot": bad_slot}
-
-
 @pytest.mark.error
 def test_nonexistent_required_course_reports_not_found(state):
     """required_courses 包含不存在的課號回報 NOT_FOUND。"""
@@ -375,8 +392,17 @@ def test_nonexistent_required_course_reports_not_found(state):
     assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
     assert result["errors"][0]["detail"] == {
         "kind": "course", "course_id": "1150099"}
-
-
+@pytest.mark.error
+def test_cancelled_required_course_reports_course_cancelled(state):
+    """required_courses 指定已取消的課程回報 COURSE_CANCELLED。"""
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    cancel_course(state, "1150001")
+    result = filter_courses(state, criteria(required_courses=["1150001"]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["COURSE_CANCELLED"]
+    assert result["errors"][0]["detail"] == {"course_id": "1150001"}
 @pytest.mark.error
 def test_nonexistent_wanted_course_reports_not_found(state):
     """wanted_courses 包含不存在的課號回報 NOT_FOUND。"""
