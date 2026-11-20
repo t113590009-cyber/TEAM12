@@ -2,7 +2,7 @@ from types import MappingProxyType
 
 from src.common.periods import slots_overlap
 from src.common.result import make_error, make_result
-from src.common.validators import DEFAULT_CREDIT_LIMIT
+from src.common.validators import DEFAULT_CREDIT_LIMIT, normalize_slot
 from src.f1_data import get_student_credits
 from src.f2_enrollment import check_enrollment
 
@@ -168,21 +168,53 @@ def _contradiction_errors(state, student_id, criteria, candidates):
                 state, student_id, candidates, min_credits, max_credits))
 
 
+def _validate_criteria(state, criteria):
+    """輸入驗證:欄位缺漏、學生存在、星期範圍、時段格式、不存在的課號。
+
+    Input: state、criteria
+    Process: 依序檢查各項前置條件,有問題全數收集後回傳
+    Output: 錯誤清單,全部通過回 []
+    """
+    errors = []
+    if not isinstance(criteria, dict) or "student_id" not in criteria:
+        errors.append(make_error("INVALID_FIELD", "欄位缺漏或不合法", {"field": "student_id"}))
+    elif criteria["student_id"] not in state.students:
+        errors.append(make_error(
+            "NOT_FOUND", "找不到資料",
+            {"kind": "student", "student_id": criteria["student_id"]}))
+
+    for day in criteria.get("preferred_days", []):
+        if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 7:
+            errors.append(make_error("INVALID_PERIOD", "星期不合法", {"day": day}))
+
+    for slot in criteria.get("blocked_slots", []):
+        if normalize_slot(slot) is None:
+            errors.append(make_error("INVALID_PERIOD", "星期或節次不合法", {"slot": slot}))
+
+    for field in ("required_courses", "wanted_courses"):
+        for course_id in criteria.get(field, []):
+            if course_id not in state.courses:
+                errors.append(make_error(
+                    "NOT_FOUND", "找不到資料",
+                    {"kind": "course", "course_id": course_id}))
+
+    return errors
+
 def filter_courses(state, criteria):
     """依個人條件篩選候選課程並檢查條件是否矛盾。
 
     Input: state、criteria(學號、希望課程、必修、學分上下限、不可上課時段、偏好星期)
-    Process: 學生存在才繼續;基本過濾分出候選與排除;再檢查六種條件矛盾
+    Process: 先做輸入驗證;通過才做基本過濾與七種條件矛盾檢查
     Output: {ok, data={student_id, candidates, excluded, feasible}, errors}
-    Boundary: 學生不存在回 NOT_FOUND;有矛盾時 feasible 為 False 但 data 仍保留
+    Boundary: 輸入驗證失敗 data 為 None;有矛盾時 feasible 為 False 但 data 仍保留
     """
+    errors = _validate_criteria(state, criteria)
+    if errors:
+        return make_result(None, errors)
+
     student_id = criteria["student_id"]
-    if student_id not in state.students:
-        return make_result(None, [make_error(
-            "NOT_FOUND", "找不到資料",
-            {"kind": "student", "student_id": student_id})])
     candidates, excluded = _split_courses(state, student_id, criteria)
-    errors = _contradiction_errors(state, student_id, criteria, candidates)
+    contradictions = _contradiction_errors(state, student_id, criteria, candidates)
     data = {"student_id": student_id, "candidates": candidates,
-            "excluded": excluded, "feasible": not errors}
-    return make_result(data, errors)
+            "excluded": excluded, "feasible": not contradictions}
+    return make_result(data, contradictions)
