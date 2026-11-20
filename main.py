@@ -16,6 +16,14 @@ from src.f4_activity import (
 from src.schedule import build_schedule, find_free_blocks
 
 DAY_NAMES = ("一", "二", "三", "四", "五", "六", "日")
+STAT_LABELS = (
+    ("course_count", "課程數"),
+    ("activity_count", "活動數"),
+    ("free_slots", "全週未占用節數"),
+    ("daily_periods", "每日節數"),
+    ("weekly_credits", "每週學分"),
+    ("free_periods", "空堂數"),
+)
 PERIOD_LABELS = "123456789abc"
 CELL_WIDTH = 10
 
@@ -220,6 +228,15 @@ def print_courses(courses):
               f"{format_slots(course['slots'])} [{course.get('status', 'active')}]")
 
 
+def cell_text(item):
+    """格子裡的一個項目轉成文字；相容多種格式，活動前面加 *。"""
+    if isinstance(item, dict):
+        kind = item.get("kind") or item.get("type")
+        prefix = "*" if kind == "activity" else ""
+        return prefix + str(item.get("id", ""))
+    return str(item)
+
+
 def print_schedule(data):
     """印出 7 × 12 課表與統計，活動以 * 標示。"""
     header = "節次" + " " * (CELL_WIDTH - 4)
@@ -229,13 +246,14 @@ def print_schedule(data):
         row = label.ljust(CELL_WIDTH)
         for day_index in range(7):
             items = data["grid"][day_index][index] or []
-            text = ",".join(("*" if item["kind"] == "activity" else "") + item["id"]
-                            for item in items)
+            if isinstance(items, dict):
+                items = [items]
+            text = ",".join(cell_text(item) for item in items)
             row += (text or "-").ljust(CELL_WIDTH)
         print(row)
-    stats = data["stats"]
-    print(f"每日節數：{stats['daily_periods']}")
-    print(f"每週學分：{stats['weekly_credits']}　空堂數：{stats['free_periods']}")
+    labels = dict(STAT_LABELS)
+    for key, value in data.get("stats", {}).items():
+        print(f"{labels.get(key, key)}：{value}")
 
 
 # ---------- 通用處理（建立、修改、依代號操作） ----------
