@@ -283,3 +283,50 @@ def test_all_contradictions_listed_together_in_fixed_order(state):
     assert [e["detail"]["reason"] for e in result["errors"]] == [
         "MIN_GT_MAX", "REQUIRED_CONFLICT", "REQUIRED_BLOCKED",
         "REQUIRED_BLOCKED", "REQUIRED_OVER_MAX"]
+
+@pytest.mark.error
+def test_min_credit_unreachable_reports_contradiction(state):
+    """候選課程學分總和低於學分下限，回報 MIN_CREDIT_UNREACHABLE 且 feasible 為 False。"""
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
+    result = filter_courses(state, criteria(min_credits=5))
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["CONSTRAINT_CONTRADICTION"]
+    assert result["errors"][0]["detail"] == {
+        "reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 5, "max_possible": 3}
+    assert result["data"]["feasible"] is False
+    # 仍保留候選清單供使用者參考
+    assert ids(result["data"]["candidates"]) == ["1150001"]
+@pytest.mark.error
+def test_min_credit_unreachable_considers_enrolled_credits(state):
+    """計算學分上限時需包含已選課程學分。"""
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
+    put_course(state, "1150002", [{"day": 3, "period": "3"}], credits=3)
+    enroll(state, "115590001", "1150001")  # 已選 3 學分
+    result = filter_courses(state, criteria(min_credits=8))  # 已選 3 + 候選 3 = 6 < 8
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 8, "max_possible": 6}]
+    assert result["data"]["feasible"] is False
+@pytest.mark.boundary
+def test_min_credit_reachable_when_equal(state):
+    """已選學分加候選課程學分剛好等於 min_credits 時為可行，不回報矛盾。"""
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
+    put_course(state, "1150002", [{"day": 3, "period": "3"}], credits=3)
+    result = filter_courses(state, criteria(min_credits=6))  # 剛好等於 6
+    assert result["ok"] is True
+    assert result["errors"] == []
+    assert result["data"]["feasible"] is True
+@pytest.mark.error
+def test_excluded_courses_do_not_count_towards_max_possible(state):
+    """被排除的課程（例如衝堂、額滿）不應計入可能達到的學分上限。"""
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
+    put_course(state, "1150002", [{"day": 2, "period": "3"}], credits=3)  # 與 0001 時段相同
+    enroll(state, "115590001", "1150001")  # 已選 0001，0002 被排除（CONFLICT_ENROLLED）
+    # 目前已選 3 學分，候選 0 學分，上限為 3
+    result = filter_courses(state, criteria(min_credits=5))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 5, "max_possible": 3}]
+    assert result["data"]["feasible"] is False
