@@ -331,3 +331,59 @@ def test_excluded_courses_do_not_count_towards_max_possible(state):
     assert [e["detail"] for e in result["errors"]] == [
         {"reason": "MIN_CREDIT_UNREACHABLE", "min_credits": 5, "max_possible": 3}]
     assert result["data"]["feasible"] is False
+
+@pytest.mark.error
+def test_missing_student_id_reports_invalid_field(state):
+    """criteria 缺少必要欄位 student_id 回報 INVALID_FIELD 且 data 為 None。"""
+    result = filter_courses(state, {})
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
+    assert result["errors"][0]["detail"] == {"field": "student_id"}
+
+
+@pytest.mark.error
+def test_preferred_days_out_of_range_reports_invalid_period(state):
+    """preferred_days 包含超出 1~7 範圍的星期回報 INVALID_PERIOD。"""
+    put_student(state)
+    result = filter_courses(state, criteria(preferred_days=[8]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
+    assert result["errors"][0]["detail"] == {"day": 8}
+
+
+@pytest.mark.error
+def test_blocked_slots_invalid_slot_reports_invalid_period(state):
+    """blocked_slots 包含非法星期或節次回報 INVALID_PERIOD。"""
+    put_student(state)
+    bad_slot = {"day": 8, "period": "3"}
+    result = filter_courses(state, criteria(blocked_slots=[bad_slot]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["INVALID_PERIOD"]
+    assert result["errors"][0]["detail"] == {"slot": bad_slot}
+
+
+@pytest.mark.error
+def test_nonexistent_required_course_reports_not_found(state):
+    """required_courses 包含不存在的課號回報 NOT_FOUND。"""
+    put_student(state)
+    result = filter_courses(state, criteria(required_courses=["1150099"]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
+    assert result["errors"][0]["detail"] == {
+        "kind": "course", "course_id": "1150099"}
+
+
+@pytest.mark.error
+def test_nonexistent_wanted_course_reports_not_found(state):
+    """wanted_courses 包含不存在的課號回報 NOT_FOUND。"""
+    put_student(state)
+    result = filter_courses(state, criteria(wanted_courses=["1150099"]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
+    assert result["errors"][0]["detail"] == {
+        "kind": "course", "course_id": "1150099"}
