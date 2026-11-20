@@ -2,6 +2,8 @@ from types import MappingProxyType
 
 from src.common.periods import slots_overlap
 from src.common.result import make_error, make_result
+from src.common.validators import DEFAULT_CREDIT_LIMIT
+from src.f1_data import get_student_credits
 from src.f2_enrollment import check_enrollment
 
 REASON_BY_CODE = MappingProxyType({
@@ -10,6 +12,12 @@ REASON_BY_CODE = MappingProxyType({
     "COURSE_FULL": "FULL",
     "STUDENT_CONFLICT": "CONFLICT_ENROLLED",
 })
+
+REQUIRED_REASONS = (
+    ("CONFLICT_ENROLLED", "REQUIRED_ENROLLED_CONFLICT"),
+    ("BLOCKED_SLOT", "REQUIRED_BLOCKED"),
+    ("FULL", "REQUIRED_FULL"),
+)
 
 
 def _exclusion_reasons(state, student_id, course_id, blocked_slots):
@@ -38,12 +46,20 @@ def _candidate_row(course, wanted, preferred_days):
             "credits": course["credits"], "wanted": wanted,
             "preferred_day": bool(preferred_days) and days <= preferred_days}
 
+
 def _rank_key(row):
     """候選排序:希望課程優先,其次偏好星期,最後依課號。"""
     return (not row["wanted"], not row["preferred_day"], row["course_id"])
 
+
 def _split_courses(state, student_id, criteria):
-    """把全部課程分成候選清單與排除清單,各依課號排序。"""
+    """把全部課程分成候選清單與排除清單。
+
+    Input: state、student_id、criteria
+    Process: 逐門課做基本過濾;候選依希望課程、偏好星期、課號排序
+    Output: (候選清單, 排除清單),排除清單依課號排序
+    Boundary: 沒有課程時兩份都是空清單
+    """
     wanted = set(criteria.get("wanted_courses", []))
     blocked = criteria.get("blocked_slots", [])
     preferred = set(criteria.get("preferred_days", []))
@@ -59,13 +75,92 @@ def _split_courses(state, student_id, criteria):
     return candidates, excluded
 
 
+def _contradiction(reason, **detail):
+    """組出一筆 CONSTRAINT_CONTRADICTION 錯誤。"""
+    return make_error("CONSTRAINT_CONTRADICTION", "條件互相矛盾",
+                      {"reason": reason, **detail})
+
+
+def _effective_max(state, student_id, criteria):
+    """學分上限:max_credits 與學生本身學分上限取較小者。"""
+    limit = state.students[student_id].get("credit_limit", DEFAULT_CREDIT_LIMIT)
+    return min(criteria.get("max_credits", limit), limit)
+
+
+def _pending_required(state, student_id, criteria):
+    """必修中仍需加選的課號(存在、未取消、尚未選),依課號排序。"""
+    pending = []
+    for course_id in sorted(set(criteria.get("required_courses", []))):
+        course = state.courses.get(course_id)
+        if course is None or course.get("status", "active") == "cancelled":
+            continue
+        if (student_id, course_id) not in state.enrollments:
+            pending.append(course_id)
+    return pending
+
+
+def _min_gt_max_errors(min_credits, max_credits):
+    """學分下限大於上限。"""
+    if min_credits > max_credits:
+        return [_contradiction("MIN_GT_MAX", min_credits=min_credits,
+                               max_credits=max_credits)]
+    return []
+
+
+def _required_conflict_errors(state, pending):
+    """兩門必修互相衝堂,每一對只列一筆。"""
+    errors = []
+    for index, first in enumerate(pending):
+        for second in pending[index + 1:]:
+            slots_a = state.courses[first]["slots"]
+            slots_b = state.courses[second]["slots"]
+            if any(slots_overlap(a, b) for a in slots_a for b in slots_b):
+                errors.append(_contradiction(
+                    "REQUIRED_CONFLICT", course_id=first, with_id=second))
+    return errors
+
+
+def _required_reason_errors(state, student_id, pending, blocked):
+    """必修課程本身的問題:與已選課程衝堂、落在不可上課時段、額滿。"""
+    reasons = {course_id: _exclusion_reasons(
+        state, student_id, course_id, blocked) for course_id in pending}
+    errors = []
+    for reason, code in REQUIRED_REASONS:
+        for course_id in pending:
+            if reason in reasons[course_id]:
+                errors.append(_contradiction(code, course_id=course_id))
+    return errors
+
+
+def _required_over_max_errors(state, student_id, pending, max_credits):
+    """已選學分加必修學分超過上限。"""
+    current = get_student_credits(state, student_id)["data"]
+    total = current + sum(state.courses[c]["credits"] for c in pending)
+    if total > max_credits:
+        return [_contradiction("REQUIRED_OVER_MAX", total_credits=total,
+                               max_credits=max_credits)]
+    return []
+
+
+def _contradiction_errors(state, student_id, criteria):
+    """六種條件矛盾各自檢查,全部跑完再依固定順序回傳。"""
+    max_credits = _effective_max(state, student_id, criteria)
+    pending = _pending_required(state, student_id, criteria)
+    blocked = criteria.get("blocked_slots", [])
+    return (_min_gt_max_errors(criteria.get("min_credits", 0), max_credits)
+            + _required_conflict_errors(state, pending)
+            + _required_reason_errors(state, student_id, pending, blocked)
+            + _required_over_max_errors(
+                state, student_id, pending, max_credits))
+
+
 def filter_courses(state, criteria):
-    """依個人條件篩選候選課程。
+    """依個人條件篩選候選課程並檢查條件是否矛盾。
 
     Input: state、criteria(學號、希望課程、必修、學分上下限、不可上課時段、偏好星期)
-    Process: 學生存在才繼續;逐門課做基本過濾,分成候選與排除
+    Process: 學生存在才繼續;基本過濾分出候選與排除;再檢查六種條件矛盾
     Output: {ok, data={student_id, candidates, excluded, feasible}, errors}
-    Boundary: 學生不存在回 NOT_FOUND;矛盾與學分檢查之後逐項加入
+    Boundary: 學生不存在回 NOT_FOUND;有矛盾時 feasible 為 False 但 data 仍保留
     """
     student_id = criteria["student_id"]
     if student_id not in state.students:
@@ -73,6 +168,7 @@ def filter_courses(state, criteria):
             "NOT_FOUND", "找不到資料",
             {"kind": "student", "student_id": student_id})])
     candidates, excluded = _split_courses(state, student_id, criteria)
+    errors = _contradiction_errors(state, student_id, criteria)
     data = {"student_id": student_id, "candidates": candidates,
-            "excluded": excluded, "feasible": True}
-    return make_result(data, [])
+            "excluded": excluded, "feasible": not errors}
+    return make_result(data, errors)
