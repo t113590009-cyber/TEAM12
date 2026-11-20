@@ -141,17 +141,31 @@ def _required_over_max_errors(state, student_id, pending, max_credits):
                                max_credits=max_credits)]
     return []
 
+def _min_credit_unreachable_errors(state, student_id, candidates, min_credits, max_credits):
+    """已選學分加候選課程學分總和低於學分下限（僅在下限小於等於上限時檢查）。"""
+    if min_credits > max_credits:
+        return []
+    current = get_student_credits(state, student_id)["data"]
+    max_possible = current + sum(c["credits"] for c in candidates)
+    if max_possible < min_credits:
+        return [_contradiction("MIN_CREDIT_UNREACHABLE",
+                               min_credits=min_credits,
+                               max_possible=max_possible)]
+    return []
 
-def _contradiction_errors(state, student_id, criteria):
-    """六種條件矛盾各自檢查,全部跑完再依固定順序回傳。"""
+def _contradiction_errors(state, student_id, criteria, candidates):
+    """七種條件矛盾各自檢查,全部跑完再依固定順序回傳。"""
     max_credits = _effective_max(state, student_id, criteria)
     pending = _pending_required(state, student_id, criteria)
     blocked = criteria.get("blocked_slots", [])
-    return (_min_gt_max_errors(criteria.get("min_credits", 0), max_credits)
+    min_credits = criteria.get("min_credits", 0)
+    return (_min_gt_max_errors(min_credits, max_credits)
             + _required_conflict_errors(state, pending)
             + _required_reason_errors(state, student_id, pending, blocked)
             + _required_over_max_errors(
-                state, student_id, pending, max_credits))
+                state, student_id, pending, max_credits)
+            + _min_credit_unreachable_errors(
+                state, student_id, candidates, min_credits, max_credits))
 
 
 def filter_courses(state, criteria):
@@ -168,7 +182,7 @@ def filter_courses(state, criteria):
             "NOT_FOUND", "找不到資料",
             {"kind": "student", "student_id": student_id})])
     candidates, excluded = _split_courses(state, student_id, criteria)
-    errors = _contradiction_errors(state, student_id, criteria)
+    errors = _contradiction_errors(state, student_id, criteria, candidates)
     data = {"student_id": student_id, "candidates": candidates,
             "excluded": excluded, "feasible": not errors}
     return make_result(data, errors)

@@ -323,7 +323,8 @@ def test_excluded_courses_do_not_count_towards_max_possible(state):
     """被排除的課程（例如衝堂、額滿）不應計入可能達到的學分上限。"""
     put_student(state)
     put_course(state, "1150001", [{"day": 2, "period": "3"}], credits=3)
-    put_course(state, "1150002", [{"day": 2, "period": "3"}], credits=3)  # 與 0001 時段相同
+    # 這裡加上 room_id="R102"，避免同教室衝堂
+    put_course(state, "1150002", [{"day": 2, "period": "3"}], room_id="R102", credits=3)
     enroll(state, "115590001", "1150001")  # 已選 0001，0002 被排除（CONFLICT_ENROLLED）
     # 目前已選 3 學分，候選 0 學分，上限為 3
     result = filter_courses(state, criteria(min_credits=5))
