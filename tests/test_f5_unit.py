@@ -175,3 +175,111 @@ def test_preferred_day_needs_all_slots_on_preferred_days(state):
     flags = {row["course_id"]: row["preferred_day"]
              for row in data["candidates"]}
     assert flags == {"1150001": False, "1150002": True}
+
+@pytest.mark.error
+def test_min_greater_than_max_reports_contradiction(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    result = filter_courses(state, criteria(min_credits=20, max_credits=15))
+    assert result["ok"] is False
+    assert [e["code"] for e in result["errors"]] == ["CONSTRAINT_CONTRADICTION"]
+    assert result["errors"][0]["detail"] == {
+        "reason": "MIN_GT_MAX", "min_credits": 20, "max_credits": 15}
+    assert result["data"]["feasible"] is False
+    assert ids(result["data"]["candidates"]) == ["1150001"]
+
+
+@pytest.mark.error
+def test_max_credits_is_limited_by_student_credit_limit(state):
+    put_student(state, credit_limit=6)
+    result = filter_courses(state, criteria(min_credits=8, max_credits=30))
+    assert result["errors"][0]["detail"] == {
+        "reason": "MIN_GT_MAX", "min_credits": 8, "max_credits": 6}
+
+
+@pytest.mark.boundary
+def test_min_equal_max_is_not_contradiction(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    result = filter_courses(state, criteria(min_credits=3, max_credits=3))
+    assert result["ok"] is True
+    assert result["data"]["feasible"] is True
+
+
+@pytest.mark.error
+def test_required_courses_conflict_with_each_other(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], room_id="R101")
+    put_course(state, "1150002", [{"day": 2, "period": "3"}], room_id="R102")
+    result = filter_courses(
+        state, criteria(required_courses=["1150002", "1150001"]))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "REQUIRED_CONFLICT",
+         "course_id": "1150001", "with_id": "1150002"}]
+
+
+@pytest.mark.error
+def test_required_conflicts_with_enrolled_course(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], room_id="R101")
+    put_course(state, "1150002", [{"day": 2, "period": "3"}], room_id="R102")
+    enroll(state, "115590001", "1150001")
+    result = filter_courses(state, criteria(required_courses=["1150002"]))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "REQUIRED_ENROLLED_CONFLICT", "course_id": "1150002"}]
+
+
+@pytest.mark.error
+def test_required_course_in_blocked_slot(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    result = filter_courses(state, criteria(
+        required_courses=["1150001"],
+        blocked_slots=[{"day": 2, "period": "3"}]))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "REQUIRED_BLOCKED", "course_id": "1150001"}]
+
+
+@pytest.mark.error
+def test_required_course_full(state):
+    put_student(state)
+    put_student(state, "115590002")
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], capacity=1)
+    enroll(state, "115590002", "1150001")
+    result = filter_courses(state, criteria(required_courses=["1150001"]))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "REQUIRED_FULL", "course_id": "1150001"}]
+
+
+@pytest.mark.error
+def test_required_credits_over_max(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    put_course(state, "1150002", [{"day": 3, "period": "3"}])
+    result = filter_courses(state, criteria(
+        required_courses=["1150001", "1150002"], max_credits=5))
+    assert [e["detail"] for e in result["errors"]] == [
+        {"reason": "REQUIRED_OVER_MAX", "total_credits": 6, "max_credits": 5}]
+
+
+@pytest.mark.boundary
+def test_enrolled_required_course_is_not_a_contradiction(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    enroll(state, "115590001", "1150001")
+    result = filter_courses(state, criteria(required_courses=["1150001"]))
+    assert result["ok"] is True
+    assert result["data"]["feasible"] is True
+
+
+@pytest.mark.error
+def test_all_contradictions_listed_together_in_fixed_order(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}], room_id="R101")
+    put_course(state, "1150002", [{"day": 2, "period": "3"}], room_id="R102")
+    result = filter_courses(state, criteria(
+        required_courses=["1150001", "1150002"], min_credits=10,
+        max_credits=5, blocked_slots=[{"day": 2, "period": "3"}]))
+    assert [e["detail"]["reason"] for e in result["errors"]] == [
+        "MIN_GT_MAX", "REQUIRED_CONFLICT", "REQUIRED_BLOCKED",
+        "REQUIRED_BLOCKED", "REQUIRED_OVER_MAX"]
