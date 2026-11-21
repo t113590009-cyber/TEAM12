@@ -2,7 +2,8 @@ from types import MappingProxyType
 
 from src.common.periods import slots_overlap
 from src.common.result import make_error, make_result
-from src.common.validators import DEFAULT_CREDIT_LIMIT, normalize_slot
+from src.common.validators import (DEFAULT_CREDIT_LIMIT, is_int_value,
+                                   normalize_slot)
 from src.f1_data import get_student_credits
 from src.f2_enrollment import check_enrollment
 
@@ -81,10 +82,15 @@ def _contradiction(reason, **detail):
                       {"reason": reason, **detail})
 
 
+def _credit_value(criteria, field, default):
+    """學分數值轉成整數(輸入驗證已確認為整數值,可能是 20.0)。"""
+    return int(criteria.get(field, default))
+
+
 def _effective_max(state, student_id, criteria):
     """學分上限:max_credits 與學生本身學分上限取較小者。"""
     limit = state.students[student_id].get("credit_limit", DEFAULT_CREDIT_LIMIT)
-    return min(criteria.get("max_credits", limit), limit)
+    return min(_credit_value(criteria, "max_credits", limit), limit)
 
 
 def _pending_required(state, student_id, criteria):
@@ -159,7 +165,7 @@ def _contradiction_errors(state, student_id, criteria, candidates):
     max_credits = _effective_max(state, student_id, criteria)
     pending = _pending_required(state, student_id, criteria)
     blocked = criteria.get("blocked_slots", [])
-    min_credits = criteria.get("min_credits", 0)
+    min_credits = _credit_value(criteria, "min_credits", 0)
     return (_min_gt_max_errors(min_credits, max_credits)
             + _required_conflict_errors(state, pending)
             + _required_reason_errors(state, student_id, pending, blocked)
@@ -169,59 +175,109 @@ def _contradiction_errors(state, student_id, criteria, candidates):
                 state, student_id, candidates, min_credits, max_credits))
 
 
-def _validate_criteria(state, criteria):
-    """輸入驗證:型態檢查、欄位缺漏、學生存在、星期範圍、時段格式、不存在或已取消課號。"""
-    if not isinstance(criteria, dict):
-        return [make_error("INVALID_FIELD", "資料必須為 dict", {"field": "criteria"})]
+def _student_errors(state, criteria):
+    """學號:須為字串,且學生必須存在。"""
+    student_id = criteria.get("student_id")
+    if not isinstance(student_id, str):
+        return [make_error("INVALID_FIELD", "欄位缺漏或不合法",
+                           {"field": "student_id"})]
+    if student_id not in state.students:
+        return [make_error("NOT_FOUND", "找不到資料",
+                           {"kind": "student", "student_id": student_id})]
+    return []
 
+
+def _is_credit_value(value):
+    """學分數值:非 bool、整數值(接受 20.0)且不小於 0。"""
+    return (not isinstance(value, bool) and is_int_value(value)
+            and value >= 0)
+
+
+def _credit_errors(criteria):
+    """學分上下限必須是非負整數,規則與共用層一致。"""
     errors = []
-    if "student_id" not in criteria or not isinstance(criteria["student_id"], str):
-        errors.append(make_error("INVALID_FIELD", "欄位缺漏或不合法", {"field": "student_id"}))
-    elif criteria["student_id"] not in state.students:
-        errors.append(make_error(
-            "NOT_FOUND", "找不到資料",
-            {"kind": "student", "student_id": criteria["student_id"]}))
-
     for field in ("min_credits", "max_credits"):
-        if field in criteria:
-            val = criteria[field]
-            if isinstance(val, bool) or not isinstance(val, int) or val < 0:
-                errors.append(make_error("INVALID_CREDIT", "學分數值必須為非負整數",
-                                         {"field": field, "value": val}))
-
-    if "preferred_days" in criteria:
-        if not isinstance(criteria["preferred_days"], list):
-            errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": "preferred_days"}))
-        else:
-            for day in criteria["preferred_days"]:
-                if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 7:
-                    errors.append(make_error("INVALID_PERIOD", "星期不合法", {"day": day}))
-
-    if "blocked_slots" in criteria:
-        if not isinstance(criteria["blocked_slots"], list):
-            errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": "blocked_slots"}))
-        else:
-            for slot in criteria["blocked_slots"]:
-                if normalize_slot(slot) is None:
-                    errors.append(make_error("INVALID_PERIOD", "星期或節次不合法", {"slot": slot}))
-
-    for field in ("required_courses", "wanted_courses"):
-        if field in criteria:
-            if not isinstance(criteria[field], list):
-                errors.append(make_error("INVALID_FIELD", "欄位必須為清單", {"field": field}))
-            else:
-                for course_id in criteria[field]:
-                    course = state.courses.get(course_id)
-                    if course is None:
-                        errors.append(make_error(
-                            "NOT_FOUND", "找不到資料",
-                            {"kind": "course", "course_id": course_id}))
-                    elif field == "required_courses" and course.get("status") == "cancelled":
-                        errors.append(make_error(
-                            "COURSE_CANCELLED", "必修課程已取消",
-                            {"course_id": course_id}))
-
+        if field in criteria and not _is_credit_value(criteria[field]):
+            errors.append(make_error(
+                "INVALID_CREDIT", "學分數值必須為非負整數",
+                {"field": field, "value": criteria[field]}))
     return errors
+
+
+def _list_field_error(field):
+    """欄位必須為清單。"""
+    return make_error("INVALID_FIELD", "欄位必須為清單", {"field": field})
+
+
+def _day_errors(criteria):
+    """preferred_days:須為清單,星期須是 1~7 的整數。"""
+    if "preferred_days" not in criteria:
+        return []
+    days = criteria["preferred_days"]
+    if not isinstance(days, list):
+        return [_list_field_error("preferred_days")]
+    return [make_error("INVALID_PERIOD", "星期不合法", {"day": day})
+            for day in days
+            if isinstance(day, bool) or not isinstance(day, int)
+            or not 1 <= day <= 7]
+
+
+def _blocked_slot_errors(criteria):
+    """blocked_slots:須為清單,每個時段須合法。"""
+    if "blocked_slots" not in criteria:
+        return []
+    slots = criteria["blocked_slots"]
+    if not isinstance(slots, list):
+        return [_list_field_error("blocked_slots")]
+    return [make_error("INVALID_PERIOD", "星期或節次不合法", {"slot": slot})
+            for slot in slots if normalize_slot(slot) is None]
+
+
+def _course_id_errors(state, field, course_id):
+    """單一課號:須為字串(先於查課號,避免 unhashable 當機)、須存在、必修不得已取消。"""
+    if not isinstance(course_id, str):
+        return [make_error("INVALID_FIELD", "課號必須為字串",
+                           {"field": field, "value": course_id})]
+    course = state.courses.get(course_id)
+    if course is None:
+        return [make_error("NOT_FOUND", "找不到資料",
+                           {"kind": "course", "course_id": course_id})]
+    if field == "required_courses" and course.get("status") == "cancelled":
+        return [make_error("COURSE_CANCELLED", "必修課程已取消",
+                           {"course_id": course_id})]
+    return []
+
+
+def _course_list_errors(state, criteria):
+    """required_courses 與 wanted_courses:須為清單,逐一檢查課號。"""
+    errors = []
+    for field in ("required_courses", "wanted_courses"):
+        if field not in criteria:
+            continue
+        if not isinstance(criteria[field], list):
+            errors.append(_list_field_error(field))
+            continue
+        for course_id in criteria[field]:
+            errors.extend(_course_id_errors(state, field, course_id))
+    return errors
+
+
+def _validate_criteria(state, criteria):
+    """輸入驗證:全部檢查跑完一次回報。
+
+    Input: state、criteria
+    Process: criteria 須為 dict;依序檢查學號、學分上下限、偏好星期、
+             不可上課時段、課號清單
+    Output: 錯誤清單,通過回 []
+    Boundary: criteria 不是 dict 直接回 INVALID_FIELD;課號不是字串回
+              INVALID_FIELD,不會當機
+    """
+    if not isinstance(criteria, dict):
+        return [make_error("INVALID_FIELD", "資料必須為 dict",
+                           {"field": "criteria"})]
+    return (_student_errors(state, criteria) + _credit_errors(criteria)
+            + _day_errors(criteria) + _blocked_slot_errors(criteria)
+            + _course_list_errors(state, criteria))
 
 
 def filter_courses(state, criteria):
