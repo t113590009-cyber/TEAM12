@@ -413,3 +413,68 @@ def test_nonexistent_wanted_course_reports_not_found(state):
     assert [e["code"] for e in result["errors"]] == ["NOT_FOUND"]
     assert result["errors"][0]["detail"] == {
         "kind": "course", "course_id": "1150099"}
+
+@pytest.mark.error
+def test_required_course_id_list_reports_invalid_field(state):
+    put_student(state)
+    result = filter_courses(state, criteria(required_courses=[["1150001"]]))
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
+    assert result["errors"][0]["detail"] == {
+        "field": "required_courses", "value": ["1150001"]}
+
+
+@pytest.mark.error
+def test_wanted_course_id_dict_reports_invalid_field(state):
+    put_student(state)
+    result = filter_courses(state, criteria(wanted_courses=[{"id": "1150001"}]))
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
+    assert result["errors"][0]["detail"] == {
+        "field": "wanted_courses", "value": {"id": "1150001"}}
+
+
+@pytest.mark.error
+def test_integer_course_id_reports_invalid_field(state):
+    put_student(state)
+    result = filter_courses(state, criteria(wanted_courses=[1150001]))
+    assert [e["code"] for e in result["errors"]] == ["INVALID_FIELD"]
+
+
+@pytest.mark.boundary
+def test_integer_valued_float_credits_are_accepted(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    result = filter_courses(state, criteria(min_credits=3.0, max_credits=20.0))
+    assert result["ok"] is True
+    assert result["data"]["feasible"] is True
+
+
+@pytest.mark.error
+def test_float_max_credits_reported_as_integer(state):
+    put_student(state)
+    put_course(state, "1150001", [{"day": 2, "period": "3"}])
+    put_course(state, "1150002", [{"day": 3, "period": "3"}])
+    result = filter_courses(state, criteria(
+        required_courses=["1150001", "1150002"], max_credits=5.0))
+    detail = result["errors"][0]["detail"]
+    assert detail == {"reason": "REQUIRED_OVER_MAX",
+                      "total_credits": 6, "max_credits": 5}
+    assert isinstance(detail["max_credits"], int)
+
+
+@pytest.mark.error
+def test_fractional_credit_reports_invalid_credit(state):
+    put_student(state)
+    result = filter_courses(state, criteria(max_credits=2.5))
+    assert [e["code"] for e in result["errors"]] == ["INVALID_CREDIT"]
+    assert result["errors"][0]["detail"] == {"field": "max_credits", "value": 2.5}
+
+
+@pytest.mark.error
+def test_bool_and_negative_credits_report_invalid_credit(state):
+    put_student(state)
+    for field, value in (("min_credits", True), ("max_credits", -1)):
+        result = filter_courses(state, criteria(**{field: value}))
+        assert [e["code"] for e in result["errors"]] == ["INVALID_CREDIT"]
+        assert result["errors"][0]["detail"] == {"field": field, "value": value}
