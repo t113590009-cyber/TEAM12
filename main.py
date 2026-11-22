@@ -1,6 +1,6 @@
 """main.py：唯一入口，只負責選單、輸入與顯示，不放核心邏輯。
 
-目前接上 F1～F4。F5（篩選）、F6（存檔與載入）合併進 main 後再補。
+目前接上 F1～F5。F6（存檔與載入）合併進 main 後再補。
 """
 from src.common.state import State
 from src.f1_data import (
@@ -12,6 +12,7 @@ from src.f4_activity import (
     add_activity, modify_activity, cancel_activity, query_activities,
     assign_room, check_signup, signup_activity, cancel_signup,
 )
+from src.f5_filter import filter_courses
 # F3 統一檔名（D 負責）後，這一行改成 from src.f3_schedule import ...
 from src.schedule import build_schedule, find_free_blocks
 
@@ -63,6 +64,23 @@ ACTIVITY_FIELDS = (
     ("room_id", "指定教室（可略過）", "text"),
 )
 
+FILTER_FIELDS = (
+    ("student_id", "學號", "text"),
+    ("wanted_courses", "希望課號（逗號分隔，可略過）", "list"),
+    ("required_courses", "必修課號（逗號分隔，可略過）", "list"),
+    ("min_credits", "學分下限（可略過）", "value"),
+    ("max_credits", "學分上限（可略過）", "value"),
+    ("blocked_slots", "不可上課時段（星期-節次，例：2-3,4-1，可略過）", "slots"),
+    ("preferred_days", "偏好星期（逗號分隔，例：2,4，可略過）", "values"),
+)
+
+EXCLUDE_LABELS = {
+    "ALREADY_ENROLLED": "已選修",
+    "CANCELLED": "已取消",
+    "FULL": "額滿",
+    "CONFLICT_ENROLLED": "與已選課程衝堂",
+    "BLOCKED_SLOT": "落在不可上課時段",
+}
 
 # ---------- 輸入工具 ----------
 
@@ -109,6 +127,8 @@ def ask_fields(fields):
             data[key] = parse_value(text)
         elif kind == "list":
             data[key] = parse_list(text)
+        elif kind == "values":
+            data[key] = [parse_value(item) for item in parse_list(text)]
         elif kind == "slots":
             data[key] = parse_slots(text)
         else:
@@ -369,6 +389,40 @@ def do_query_activities(state):
               f"[{act.get('status', 'active')}]")
 
 
+def print_filter_result(state, result):
+    """印出課程篩選結果：候選、排除、條件是否可行。"""
+    data = result["data"]
+    if data is None:
+        print("【失敗】")
+        print_errors(result["errors"])
+        return
+    print(f"學生：{data['student_id']}")
+    print(f"候選課程（{len(data['candidates'])} 門）：")
+    for row in data["candidates"]:
+        marks = ""
+        if row["wanted"]:
+            marks += " [希望]"
+        if row["preferred_day"]:
+            marks += " [偏好星期]"
+        print(f"  {row['course_id']} {row['name']} {row['credits']}學分{marks}")
+    print(f"已排除（{len(data['excluded'])} 門）：")
+    for row in data["excluded"]:
+        name = state.courses[row["course_id"]]["name"]
+        reasons = "、".join(EXCLUDE_LABELS.get(r, r) for r in row["reasons"])
+        print(f"  {row['course_id']} {name}：{reasons}")
+    if data["feasible"]:
+        print("【條件可行】")
+    else:
+        print("【條件矛盾】")
+        print_errors(result["errors"])
+
+
+def do_filter(state):
+    """詢問篩選條件（Enter 略過），呼叫 F5 並顯示結果。"""
+    print("條件不需要的欄位直接按 Enter。")
+    criteria = ask_fields(FILTER_FIELDS)
+    print_filter_result(state, filter_courses(state, criteria))
+
 def load_demo_data(state):
     """暫時用：以 F1 函式放入幾筆示範資料（F6 合併後移除）。"""
     rooms = [
@@ -466,15 +520,16 @@ def build_menus():
         ("取消報名", lambda s: do_by_two_ids(
             s, cancel_signup, "學號", "活動代號", "取消報名")),
     ]
+    
     return [
         ("課程管理", lambda s: run_menu("課程管理", course_items, s)),
         ("學生與教室", lambda s: run_menu("學生與教室", people_items, s)),
         ("選課", lambda s: run_menu("選課", enroll_items, s)),
         ("課表", lambda s: run_menu("課表", schedule_items, s)),
         ("活動", lambda s: run_menu("活動", activity_items, s)),
+        ("課程篩選", do_filter),
         ("載入示範資料（暫時）", load_demo_data),
     ]
-
 
 def main():
     """建立 State，進入主選單。"""
