@@ -69,7 +69,8 @@ def _room_conflict_errors(state, activity):
     room_id = activity.get("room_id")
     if room_id is None or not _is_active(activity):
         return []
-    errors = check_room_conflict(state, room_id, _activity_slots(activity))["errors"]
+    errors = check_room_conflict(state, room_id, _activity_slots(activity),
+                                 include_activities=False)["errors"]
     for other in sorted(state.activities.values(), key=lambda a: a["activity_id"]):
         if (other["activity_id"] != activity["activity_id"] and other.get("room_id") == room_id
                 and _is_active(other) and _same_time(activity, other)):

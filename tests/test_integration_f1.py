@@ -6,6 +6,7 @@ from src.f1_data import (
     cancel_course, delete_course,
     modify_course, query_courses
 )
+from src.f2_enrollment import enroll
 
 
 def make_course(course_id, period="3"):
@@ -112,8 +113,7 @@ def test_delete_course_in_use(state):
     }
 
     assert add_student(state, student)["ok"] is True
-    # 尚無選課 API，先直接寫入 state；選課功能完成後改走正式流程
-    state.enrollments.add(("115590001", "1150001"))
+    assert enroll(state, "115590001", "1150001")["ok"] is True
 
     result = delete_course(state, "1150001")
 
